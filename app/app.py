@@ -57,7 +57,7 @@ RADAR_PALETTE = [
 
 def dataset_status_text() -> str:
     if DATA["source_status"] == "loaded":
-        return DATA["source_path"]
+        return "2025-26 women's Division I player dataset loaded"
     return "No processed women's Division I dataset found yet."
 
 
@@ -691,7 +691,7 @@ app_ui = ui.page_fluid(
         {"id": "atlas-shell"},
         ui.div(
             {"id": "masthead"},
-            ui.div({"class": "mast-left"}, ui.div(ui.HTML("NCAA Women's Basketball <span class='dot'></span> 2025–26"), class_="kicker"), ui.div(ui.HTML("Player <em>Dashboard</em>"), class_="atlas-title"), ui.div("Women's Division I transfer dashboard.", class_="dek"), ui.div(f"Dataset: {dataset_status_text()}", class_="byline")),
+            ui.div({"class": "mast-left"}, ui.div(ui.HTML("NCAA Women's Basketball <span class='dot'></span> 2025–26"), class_="kicker"), ui.div(ui.HTML("Player <em>Dashboard</em>"), class_="atlas-title"), ui.div("Women's Division I transfer dashboard.", class_="dek"), ui.div(dataset_status_text(), class_="byline")),
             ui.div(
                 {"class": "mast-meta"},
                 ui.div(ui.div(str(TOTAL_PLAYERS), class_="mast-stat-num"), ui.div("D-I Players", class_="mast-stat-lbl"), class_="mast-stat"),
@@ -723,7 +723,7 @@ app_ui = ui.page_fluid(
                 ),
             ),
         ),
-        ui.div({"id": "site-footer"}, "Women’s Division I source of truth · adapted from the men’s product shell"),
+        ui.div({"id": "site-footer"}, "Women’s Division I dashboard"),
     ),
     ui.output_ui("d1_modal_trigger"),
 )
