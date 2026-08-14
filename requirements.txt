@@ -1,0 +1,8 @@
+asttokens
+numpy
+pandas
+plotly
+scipy
+scikit-learn
+shiny
+shinywidgets
