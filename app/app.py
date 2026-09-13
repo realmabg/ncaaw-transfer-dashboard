@@ -78,6 +78,7 @@ ARCHETYPE_COLOR = {
     "2-4 Wing": "#5ab87a",
     "Stretch Big": "#c8a84b",
 }
+ARCHETYPE_ORDER = list(ARCHETYPE_COLOR)
 TRITON_ZONE_METRICS = [
     {"key": "efg", "col": "efg", "label": "eFG%", "long": "Effective FG%", "scale": 100.0, "target": 50.0, "higher_is_better": True, "weight": 20.0},
     {"key": "three_pct", "col": "tp", "label": "3PT%", "long": "Three-point percentage", "scale": 100.0, "target": 36.0, "higher_is_better": True, "weight": 18.0},
@@ -290,6 +291,45 @@ def historical_current_comps(row, n=HISTORICAL_CURRENT_LIMIT):
     current = current.sort_values(["distance", "bpm"], ascending=[True, False]).head(n)
     comps = []
     for i, (_, comp) in enumerate(current.iterrows(), start=1):
+        sim = 100 * np.exp(-0.75 * float(comp["distance"]))
+        comps.append({"rank": i, "similarity_score": max(0, min(100, sim)), **comp.to_dict()})
+    return comps
+
+
+def current_historical_comps(row, n=HISTORICAL_CURRENT_LIMIT):
+    if row is None or HISTORICAL.empty:
+        return []
+    cols = [(h, c, w) for h, c, w in HISTORICAL_FEATURES if h in HISTORICAL.columns and c in df.columns]
+    if not cols:
+        return []
+    historical = HISTORICAL.copy()
+    if "pos" in historical.columns and "pos" in row:
+        historical = historical[historical["pos"].eq(row["pos"])]
+        if historical.empty:
+            historical = HISTORICAL.copy()
+    score = pd.Series(0.0, index=historical.index)
+    weight = pd.Series(0.0, index=historical.index)
+    for hist_col, current_col, w in cols:
+        cval = _as_float(row.get(current_col))
+        hvals = pd.to_numeric(historical[hist_col], errors="coerce")
+        pool = pd.concat([pd.to_numeric(HISTORICAL[hist_col], errors="coerce"), pd.to_numeric(df[current_col], errors="coerce")]).dropna()
+        spread = pool.std(ddof=0)
+        if not np.isfinite(cval) or not np.isfinite(spread) or spread <= 0:
+            continue
+        dist = ((hvals - cval) / spread).abs()
+        score += dist.fillna(0) * w
+        weight += hvals.notna().astype(float) * w
+    historical = historical.assign(distance=(score / weight.replace(0, np.nan))).dropna(subset=["distance"])
+    if historical.empty:
+        return []
+    sort_cols = ["distance"]
+    ascending = [True]
+    if "bpm" in historical.columns:
+        sort_cols.append("bpm")
+        ascending.append(False)
+    historical = historical.sort_values(sort_cols, ascending=ascending).head(n)
+    comps = []
+    for i, (_, comp) in enumerate(historical.iterrows(), start=1):
         sim = 100 * np.exp(-0.75 * float(comp["distance"]))
         comps.append({"rank": i, "similarity_score": max(0, min(100, sim)), **comp.to_dict()})
     return comps
@@ -1127,19 +1167,34 @@ def make_sidebar(prefix, frame, conference_rows):
     ato_min, ato_max = slider_range(frame, "ast_tov", 0.1, (0.0, 5.0))
     rpg_min, rpg_max = slider_range(frame, "rpg", 0.1, (0.0, 15.0))
     drb_min, drb_max = slider_range(frame, "drb_pct", 0.01, (0.0, 1.0))
+    orb_pct_min, orb_pct_max = slider_range(frame, "orb_pct", 0.01, (0.0, 1.0))
+    ast_pct_min, ast_pct_max = slider_range(frame, "ast_pct", 0.01, (0.0, 1.0))
+    stl_pct_min, stl_pct_max = slider_range(frame, "stl_pct", 0.01, (0.0, 1.0))
+    blk_pct_min, blk_pct_max = slider_range(frame, "blk_pct", 0.01, (0.0, 1.0))
     bpg_min, bpg_max = slider_range(frame, "bpg", 0.1, (0.0, 4.0))
     spg_min, spg_max = slider_range(frame, "spg", 0.1, (0.0, 4.0))
     h_min, h_max = slider_range(frame, "heightIn", 1, (60, 84))
     eligibility_min, eligibility_max = slider_range(frame, "eligibility", 1, (1, 5))
     usg_min, usg_max = slider_range(frame, "usg", 0.01, (0.0, 1.0))
+    ft_min, ft_max = slider_range(frame, "ft", 0.01, (0.0, 1.0))
+    ftr_min, ftr_max = slider_range(frame, "ftr", 0.01, (0.0, 1.0))
+    tov_pct_min, tov_pct_max = slider_range(frame, "tov_pct", 0.01, (0.0, 1.0))
+    pf40_min, pf40_max = slider_range(frame, "pf_per_40", 0.1, (0.0, 5.0))
+    rim_share_min, rim_share_max = slider_range(frame, "rim_share", 0.01, (0.0, 1.0))
+    mid_share_min, mid_share_max = slider_range(frame, "mid_share", 0.01, (0.0, 1.0))
     bpm_available = pd.to_numeric(frame.get("bpm"), errors="coerce").notna().any()
     bpm_min, bpm_max = slider_range(frame, "bpm", 0.1, (-10.0, 15.0)) if bpm_available else (0, 0)
+    porpag_available = pd.to_numeric(frame.get("porpag"), errors="coerce").notna().any()
+    porpag_min, porpag_max = slider_range(frame, "porpag", 0.1, (0.0, 10.0)) if porpag_available else (0, 0)
     conf_choices = {c["conf"]: c["confName"] for c in sorted(conference_rows, key=lambda x: x["confName"])}
     position_values = [p for p in ["G", "G/F", "F", "F/C", "C"] if p in set(frame["pos"].fillna("").astype(str))]
     return ui.div(
         {"class": "sidebar", "id": "sidebar"},
         ui.div("Filters", class_="sb-title"),
+        ui.div(ui.div("Sample Size", class_="sb-section-head"), ui.input_checkbox(f"{prefix}_exclude_low_sample", "Exclude low sample size", value=False), class_="sb-section") if "low_sample_size" in frame.columns else ui.div(),
         ui.div(ui.div("Search by name", class_="sb-section-head"), ui.input_text(f"{prefix}_q", None, placeholder="e.g. Hannah Hidalgo"), class_="sb-section"),
+        ui.div(ui.div(ui.span("Archetype"), ui.tags.button("clear", class_="clear-btn", onclick=f"Shiny.setInputValue('{prefix}_clear_arch',Math.random())"), class_="sb-section-head"), ui.input_checkbox_group(f"{prefix}_archetypes", None, choices={a: a for a in ARCHETYPE_ORDER}), class_="sb-section"),
+        ui.div(ui.div("Minimum archetype score", class_="sb-section-head"), ui.input_slider(f"{prefix}_score_min", None, min=0, max=100, value=0, step=1), class_="sb-section"),
         ui.div(ui.div(ui.span("Position"), ui.tags.button("clear", class_="clear-btn", onclick=f"Shiny.setInputValue('{prefix}_clear_pos',Math.random())"), class_="sb-section-head"), ui.input_checkbox_group(f"{prefix}_positions", None, choices={p: p for p in position_values}), class_="sb-section"),
         ui.div(ui.div(ui.span("Class"), ui.tags.button("clear", class_="clear-btn", onclick=f"Shiny.setInputValue('{prefix}_clear_cls',Math.random())"), class_="sb-section-head"), ui.input_checkbox_group(f"{prefix}_classes", None, choices={c: c for c in CLASSES}), class_="sb-section"),
         ui.div(ui.div(ui.span("Eligibility Used"), ui.tags.button("clear", class_="clear-btn", onclick=f"Shiny.setInputValue('{prefix}_clear_eligibility',Math.random())"), class_="sb-section-head"), ui.input_slider(f"{prefix}_eligibility", None, min=eligibility_min, max=eligibility_max, value=[eligibility_min, eligibility_max], step=1), class_="sb-section"),
@@ -1154,12 +1209,23 @@ def make_sidebar(prefix, frame, conference_rows):
         ui.div(ui.div("Usage", class_="sb-section-head"), ui.input_slider(f"{prefix}_usg", None, min=usg_min, max=usg_max, value=[usg_min, usg_max], step=0.01), class_="sb-section"),
         ui.div(ui.div("AST/TOV ratio", class_="sb-section-head"), ui.input_slider(f"{prefix}_ast_tov", None, min=ato_min, max=ato_max, value=[ato_min, ato_max], step=0.1), class_="sb-section"),
         ui.div(ui.div("RPG", class_="sb-section-head"), ui.input_slider(f"{prefix}_rpg_range", None, min=rpg_min, max=rpg_max, value=[rpg_min, rpg_max], step=0.1), class_="sb-section"),
+        ui.div(ui.div("ORB%", class_="sb-section-head"), ui.input_slider(f"{prefix}_orb_pct", None, min=orb_pct_min, max=orb_pct_max, value=[orb_pct_min, orb_pct_max], step=0.01), class_="sb-section"),
         ui.div(ui.div("DRB%", class_="sb-section-head"), ui.input_slider(f"{prefix}_drb_range", None, min=drb_min, max=drb_max, value=[drb_min, drb_max], step=0.01), class_="sb-section"),
+        ui.div(ui.div("AST%", class_="sb-section-head"), ui.input_slider(f"{prefix}_ast_pct", None, min=ast_pct_min, max=ast_pct_max, value=[ast_pct_min, ast_pct_max], step=0.01), class_="sb-section"),
+        ui.div(ui.div("STL%", class_="sb-section-head"), ui.input_slider(f"{prefix}_stl_pct", None, min=stl_pct_min, max=stl_pct_max, value=[stl_pct_min, stl_pct_max], step=0.01), class_="sb-section"),
+        ui.div(ui.div("BLK%", class_="sb-section-head"), ui.input_slider(f"{prefix}_blk_pct", None, min=blk_pct_min, max=blk_pct_max, value=[blk_pct_min, blk_pct_max], step=0.01), class_="sb-section"),
+        ui.div(ui.div("FT%", class_="sb-section-head"), ui.input_slider(f"{prefix}_ft_range", None, min=ft_min, max=ft_max, value=[ft_min, ft_max], step=0.01), class_="sb-section"),
+        ui.div(ui.div("FTR", class_="sb-section-head"), ui.input_slider(f"{prefix}_ftr_range", None, min=ftr_min, max=ftr_max, value=[ftr_min, ftr_max], step=0.01), class_="sb-section"),
+        ui.div(ui.div("TOV%", class_="sb-section-head"), ui.input_slider(f"{prefix}_tov_pct_range", None, min=tov_pct_min, max=tov_pct_max, value=[tov_pct_min, tov_pct_max], step=0.01), class_="sb-section"),
+        ui.div(ui.div("PF/40", class_="sb-section-head"), ui.input_slider(f"{prefix}_pf40_range", None, min=pf40_min, max=pf40_max, value=[pf40_min, pf40_max], step=0.1), class_="sb-section"),
+        ui.div(ui.div("Rim Share", class_="sb-section-head"), ui.input_slider(f"{prefix}_rim_share", None, min=rim_share_min, max=rim_share_max, value=[rim_share_min, rim_share_max], step=0.01), class_="sb-section"),
+        ui.div(ui.div("Mid Share", class_="sb-section-head"), ui.input_slider(f"{prefix}_mid_share", None, min=mid_share_min, max=mid_share_max, value=[mid_share_min, mid_share_max], step=0.01), class_="sb-section"),
         ui.div(ui.div("BPG", class_="sb-section-head"), ui.input_slider(f"{prefix}_bpg_range", None, min=bpg_min, max=bpg_max, value=[bpg_min, bpg_max], step=0.1), class_="sb-section"),
         ui.div(ui.div("SPG", class_="sb-section-head"), ui.input_slider(f"{prefix}_spg_range", None, min=spg_min, max=spg_max, value=[spg_min, spg_max], step=0.1), class_="sb-section"),
         ui.div(ui.div("Height", class_="sb-section-head"), ui.input_slider(f"{prefix}_height", None, min=h_min, max=h_max, value=[h_min, h_max], step=1), class_="sb-section"),
         ui.div(ui.div("BPM", class_="sb-section-head"), ui.input_slider(f"{prefix}_bpm", None, min=bpm_min, max=bpm_max, value=[bpm_min, bpm_max], step=0.1), class_="sb-section") if bpm_available else ui.div(),
-        ui.div({"class": "sb-count"}, ui.span("Showing", class_="lbl"), ui.output_text(f"{prefix}_filter_count")),
+        ui.div(ui.div("PORPAG", class_="sb-section-head"), ui.input_slider(f"{prefix}_porpag", None, min=porpag_min, max=porpag_max, value=[porpag_min, porpag_max], step=0.1), class_="sb-section") if porpag_available else ui.div(),
+        ui.div({"class": "sb-count"}, ui.div(ui.span("Showing", class_="lbl"), ui.output_text(f"{prefix}_filter_count")), ui.div(ui.span("Filtered Out", class_="lbl"), ui.output_text(f"{prefix}_filtered_out_count"))),
     )
 
 
@@ -1177,7 +1243,7 @@ def make_detail_modal(player_id, frame, league_avg_map, similar_fn, watchlist, s
     if similarity_metric not in SIMILARITY_METRIC_LABELS:
         similarity_metric = "mahalanobis"
     sims = similar_fn(player_id, n_sim=5, metric=similarity_metric)
-    hist_comps = historical_current_comps(row, n=5)
+    hist_comps = current_historical_comps(row, n=5)
     pc = ARCHETYPE_COLOR.get(row.get("primary_archetype"), position_color(row.get("pos", "")))
     starred = player_id in watchlist
     star_icon = "\u2605" if starred else "\u2606"
@@ -1255,18 +1321,25 @@ def make_detail_modal(player_id, frame, league_avg_map, similar_fn, watchlist, s
         )
     hist_rows = []
     for comp in hist_comps:
+        payload = {"source_id": str(comp.get("season_player_id", "") or ""), "target_id": str(row.get("id", "") or "")}
         hist_rows.append(
             ui.div(
-                {"class": "sim-row historical", "onclick": f"Shiny.setInputValue('d1_select_similar','{comp['id']}',{{priority:'event'}})"},
+                {
+                    "class": "sim-row historical",
+                    "onclick": f"Shiny.setInputValue('hist_open_compare',{json.dumps(payload)},{{priority:'event'}})",
+                    "title": f"Compare {comp.get('player_name', 'historical player')} to {row['name']}",
+                },
                 ui.div(f"{comp['rank']:02d}", class_="sim-rank"),
                 ui.div(
-                    ui.div(comp["name"], class_="nm"),
-                    ui.div(ui.span(comp["team"]), ui.span(f"· {comp['cls']} · {comp['primary_archetype']}", style="color:var(--ink-3)"), class_="meta"),
+                    ui.div(comp.get("player_name", "Unknown player"), class_="nm"),
+                    ui.div(ui.span(comp.get("team", "")), ui.span(f"· {int(_as_float(comp.get('year'), 0))} · {comp.get('archetype', '')}", style="color:var(--ink-3)"), class_="meta"),
                     class_="sim-main",
                 ),
                 ui.div(f"{comp['similarity_score']:.0f}", ui.span("historical fit", class_="sim-lbl"), class_="sim-pct"),
             )
         )
+    season_panel_id = f"season-statline-{player_id}"
+    eff_panel_id = f"eff-statline-{player_id}"
 
     body = ui.div(
         {"id": "detail-body"},
@@ -1280,10 +1353,35 @@ def make_detail_modal(player_id, frame, league_avg_map, similar_fn, watchlist, s
         ),
         ui.div(
             {"class": "detail-col"},
-            ui.div("Season Statline ", ui.span("2025–26", class_="sub"), class_="col-title"),
-            ui.div({"class": "statline"}, *statline),
-            ui.div("Efficiency", ui.span("rates and impact", class_="sub"), class_="col-title"),
-            ui.div({"class": "statline"}, *eff_cells),
+            ui.div(
+                {"class": "statline-header"},
+                ui.div("Season Statline ", ui.span("2025-26", class_="sub"), class_="col-title"),
+                ui.div(
+                    {"class": "statline-toggle"},
+                    ui.tags.button(
+                        "Season",
+                        class_="pill-btn active",
+                        onclick=(
+                            f"document.getElementById('{season_panel_id}').style.display='grid';"
+                            f"document.getElementById('{eff_panel_id}').style.display='none';"
+                            "this.parentElement.querySelectorAll('.pill-btn').forEach(btn=>btn.classList.remove('active'));"
+                            "this.classList.add('active');"
+                        ),
+                    ),
+                    ui.tags.button(
+                        "Efficiency",
+                        class_="pill-btn",
+                        onclick=(
+                            f"document.getElementById('{season_panel_id}').style.display='none';"
+                            f"document.getElementById('{eff_panel_id}').style.display='grid';"
+                            "this.parentElement.querySelectorAll('.pill-btn').forEach(btn=>btn.classList.remove('active'));"
+                            "this.classList.add('active');"
+                        ),
+                    ),
+                ),
+            ),
+            ui.div({"class": "statline", "id": season_panel_id, "style": "display:grid;"}, *statline),
+            ui.div({"class": "statline", "id": eff_panel_id, "style": "display:none;"}, *eff_cells),
             ui.div("vs. League Average ", ui.span("unweighted mean, all WBB D-I players", class_="sub"), class_="col-title"),
             *bars,
             ui.div(ui.tags.b("Bar", style="color:var(--ink-2)"), " = player value.  ", ui.tags.b("Tick", style="color:var(--ink-2)"), " = league mean.", class_="bar-note"),
@@ -1741,6 +1839,11 @@ def server(input, output, session):
         ui.update_checkbox_group("d1_positions", selected=[])
 
     @reactive.effect
+    @reactive.event(input.d1_clear_arch)
+    def _d1_clear_arch():
+        ui.update_checkbox_group("d1_archetypes", selected=[])
+
+    @reactive.effect
     @reactive.event(input.d1_clear_cls)
     def _d1_clear_cls():
         ui.update_checkbox_group("d1_classes", selected=[])
@@ -1820,9 +1923,17 @@ def server(input, output, session):
     @reactive.calc
     def d1_filtered():
         d = df.copy()
+        if "low_sample_size" in d.columns and bool(input.d1_exclude_low_sample()):
+            d = d[~d["low_sample_size"].fillna(False)]
         q = (input.d1_q() or "").strip().lower()
         if q:
             d = d[d["name"].str.lower().str.contains(q, na=False)]
+        archs = list(input.d1_archetypes() or [])
+        if archs:
+            d = d[d["primary_archetype"].isin(archs)]
+        score_min = float(input.d1_score_min() or 0)
+        if score_min > 0 and "primary_score" in d.columns:
+            d = d[pd.to_numeric(d["primary_score"], errors="coerce").fillna(-1) >= score_min]
         ps = list(input.d1_positions() or [])
         if ps:
             d = d[d["pos"].isin(ps)]
@@ -1843,14 +1954,34 @@ def server(input, output, session):
         d = d[(d["ppg"] >= lo) & (d["ppg"] <= hi)]
         lo, hi = input.d1_rpg_range()
         d = d[(d["rpg"] >= lo) & (d["rpg"] <= hi)]
+        lo, hi = input.d1_orb_pct()
+        d = d[(d["orb_pct"] >= lo) & (d["orb_pct"] <= hi)]
         lo, hi = input.d1_drb_range()
         d = d[(d["drb_pct"] >= lo) & (d["drb_pct"] <= hi)]
+        lo, hi = input.d1_ast_pct()
+        d = d[(d["ast_pct"] >= lo) & (d["ast_pct"] <= hi)]
+        lo, hi = input.d1_stl_pct()
+        d = d[(d["stl_pct"] >= lo) & (d["stl_pct"] <= hi)]
+        lo, hi = input.d1_blk_pct()
+        d = d[(d["blk_pct"] >= lo) & (d["blk_pct"] <= hi)]
         lo, hi = input.d1_efg()
         d = d[(d["efg"] >= lo) & (d["efg"] <= hi)]
         lo, hi = input.d1_tp_range()
         d = d[(d["tp"] >= lo) & (d["tp"] <= hi)]
+        lo, hi = input.d1_ft_range()
+        d = d[(d["ft"] >= lo) & (d["ft"] <= hi)]
+        lo, hi = input.d1_ftr_range()
+        d = d[(d["ftr"] >= lo) & (d["ftr"] <= hi)]
+        lo, hi = input.d1_tov_pct_range()
+        d = d[(d["tov_pct"] >= lo) & (d["tov_pct"] <= hi)]
+        lo, hi = input.d1_pf40_range()
+        d = d[(d["pf_per_40"] >= lo) & (d["pf_per_40"] <= hi)]
         lo, hi = input.d1_three_share()
         d = d[(d["three_share"] >= lo) & (d["three_share"] <= hi)]
+        lo, hi = input.d1_rim_share()
+        d = d[(d["rim_share"] >= lo) & (d["rim_share"] <= hi)]
+        lo, hi = input.d1_mid_share()
+        d = d[(d["mid_share"] >= lo) & (d["mid_share"] <= hi)]
         lo, hi = input.d1_apg_range()
         d = d[(d["apg"] >= lo) & (d["apg"] <= hi)]
         lo, hi = input.d1_usg()
@@ -1866,6 +1997,9 @@ def server(input, output, session):
         if "bpm" in d.columns and input.d1_bpm() is not None:
             lo, hi = input.d1_bpm()
             d = d[(pd.to_numeric(d["bpm"], errors="coerce").fillna(lo) >= lo) & (pd.to_numeric(d["bpm"], errors="coerce").fillna(hi) <= hi)]
+        if "porpag" in d.columns and input.d1_porpag() is not None:
+            lo, hi = input.d1_porpag()
+            d = d[(pd.to_numeric(d["porpag"], errors="coerce").fillna(lo) >= lo) & (pd.to_numeric(d["porpag"], errors="coerce").fillna(hi) <= hi)]
         return d
 
     @reactive.calc
@@ -1942,6 +2076,11 @@ def server(input, output, session):
     @render.text
     def d1_filter_count():
         return f"{len(d1_filtered())} / {TOTAL_PLAYERS}"
+
+    @output
+    @render.text
+    def d1_filtered_out_count():
+        return str(max(0, TOTAL_PLAYERS - len(d1_filtered())))
 
     @output
     @render.ui
