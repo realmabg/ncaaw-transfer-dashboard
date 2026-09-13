@@ -398,9 +398,34 @@ html, body {
 
 
 /* ── Modal overrides ────────────────────────────────────────────── */
+.modal {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 1055 !important;
+  display: none;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  background: rgba(5, 9, 16, .68) !important;
+}
+.modal.show {
+  display: block !important;
+}
+.modal-backdrop {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 1050 !important;
+  background: rgba(5, 9, 16, .72) !important;
+}
+.modal-open {
+  overflow: hidden !important;
+}
 .modal-dialog {
   max-width: 1000px !important;
   max-height: calc(100vh - 48px) !important;
+  margin: 24px auto !important;
+  position: relative !important;
+  width: min(1000px, calc(100vw - 48px)) !important;
+  pointer-events: auto !important;
 }
 .modal-content {
   border: 2px solid var(--ink) !important;
@@ -1954,7 +1979,11 @@ html, body {
   padding-bottom:5px !important;
 }
 .sidebar .tag-filter-section .checkbox label::before { margin-top:.35em; }
-.modal-dialog { max-width:1000px !important; max-height:calc(100vh - 48px) !important; }
+.modal { position:fixed !important; inset:0 !important; z-index:1055 !important; display:none; overflow-x:hidden !important; overflow-y:auto !important; background:rgba(5,9,16,.68) !important; }
+.modal.show { display:block !important; }
+.modal-backdrop { position:fixed !important; inset:0 !important; z-index:1050 !important; background:rgba(5,9,16,.72) !important; }
+.modal-open { overflow:hidden !important; }
+.modal-dialog { max-width:1000px !important; max-height:calc(100vh - 48px) !important; margin:24px auto !important; position:relative !important; width:min(1000px, calc(100vw - 48px)) !important; pointer-events:auto !important; }
 .modal-content {
   border:2px solid var(--ink) !important;
   border-radius:0 !important;
