@@ -323,6 +323,78 @@ def historical_current_comp_cards(comps):
     return cards
 
 
+def historical_stat_cell(label, value):
+    return ui.div(
+        {"class": "stat-cell"},
+        ui.div(str(value), class_="num"),
+        ui.div(label, class_="lbl"),
+    )
+
+
+def make_historical_detail_modal(row, saved_ids):
+    row_id = str(row.get("season_player_id", ""))
+    comps = historical_current_comps(row)
+    comp_cards = historical_current_comp_cards(comps)
+    saved = row_id in saved_ids
+    arch = str(row.get("archetype", ""))
+    accent = ARCHETYPE_COLOR.get(arch, position_color(row.get("pos", "")))
+    statline = [
+        historical_stat_cell("MIN", historical_metric(row, "mins_per_game")),
+        historical_stat_cell("PTS", historical_metric(row, "pts_per_game")),
+        historical_stat_cell("REB", historical_metric(row, "treb_per_game")),
+        historical_stat_cell("AST", historical_metric(row, "ast_per_game")),
+        historical_stat_cell("STL", historical_metric(row, "stl_per_game")),
+        historical_stat_cell("BLK", historical_metric(row, "blk_per_game")),
+        historical_stat_cell("BPM", historical_metric(row, "bpm")),
+        historical_stat_cell("eFG%", historical_metric(row, "eFG", "{:.1%}")),
+        historical_stat_cell("3P%", historical_metric(row, "3P_pct", "{:.1%}")),
+        historical_stat_cell("AST/TOV", historical_metric(row, "AST_TOV")),
+        historical_stat_cell("DRB%", historical_metric(row, "DRB_pct", "{:.1%}")),
+        historical_stat_cell("3PA/FGA", historical_metric(row, "three_share", "{:.1%}")),
+    ]
+    body = ui.div(
+        {"id": "detail-body", "class": "historical-detail-body"},
+        ui.div(
+            {"class": "detail-col"},
+            ui.div(str(row.get("player_name", "Unknown player")), class_="player-name"),
+            ui.div(ui.span({"class": "team-dot", "style": f"background:{accent}"}), historical_profile_subtitle(row), class_="player-team"),
+            ui.div(
+                {"class": "bio-grid"},
+                bio_item("Division", "WBB historical"),
+                bio_item("Season", str(int(_as_float(row.get("year"), 0))) if np.isfinite(_as_float(row.get("year"), np.nan)) else "N/A", mono=True),
+                bio_item("Team", str(row.get("team", ""))),
+                bio_item("Conference", str(row.get("conf", "")), mono=True),
+                bio_item("Position", str(row.get("pos", "")), mono=True),
+                bio_item("Archetype", arch or "N/A"),
+                bio_item("Height", height_str(_as_float(row.get("height_inches"), 0)), mono=True),
+                bio_item("Min/G", historical_metric(row, "mins_per_game"), mono=True),
+            ),
+            ui.tags.button(
+                "Saved to Tracker" if saved else "Save to Tracker",
+                class_="similarity-beta-more",
+                onclick=f"Shiny.setInputValue('tracker_toggle',{json.dumps(row_id)},{{priority:'event'}})",
+            ),
+        ),
+        ui.div(
+            {"class": "detail-col historical-modal-stats"},
+            ui.div("Season Statline", ui.span("2021-25 historical pool", class_="sub"), class_="col-title"),
+            ui.div({"class": "statline"}, *statline),
+        ),
+        ui.div(
+            {"class": "detail-col historical-modal-comps"},
+            ui.div("Current Players Most Like This Profile", ui.span("2026 WBB D-I pool", class_="sub"), class_="col-title"),
+            ui.div({"class": "historical-comp-list"}, *(comp_cards if comp_cards else [ui.div("No current-player comps are available for that historical profile yet.", class_="historical-empty")])),
+        ),
+    )
+    return ui.modal(
+        body,
+        title=ui.HTML(f"Historical Player Profile <b>· {html.escape(str(row.get('player_name', 'Unknown player')))}</b> <span class='div-badge'>WBB</span>"),
+        easy_close=True,
+        size="xl",
+        footer=None,
+    )
+
+
 def tracker_ideal_card(row, board_index=0, saved=False):
     row_id = str(row.get("season_player_id", ""))
     comps = historical_current_comps(row, n=HISTORICAL_TRACKER_COMP_LIMIT)
@@ -1081,7 +1153,6 @@ def make_historical_tab():
             ),
             ui.div({"class": "historical-results-head"}, ui.output_text("hist_results_count"), ui.div("Click a row to open a profile and load current-player comps.", class_="historical-results-note")),
             ui.output_ui("historical_table_ui"),
-            ui.output_ui("historical_current_comps_ui"),
         ),
     )
 
@@ -1402,6 +1473,9 @@ def server(input, output, session):
         row_id = input.hist_select_row()
         if row_id:
             historical_selected.set(str(row_id))
+            row = historical_row_by_id(row_id)
+            if row is not None:
+                ui.modal_show(make_historical_detail_modal(row, tracker_ids.get()))
 
     @reactive.effect
     @reactive.event(input.tracker_toggle)
@@ -1663,28 +1737,6 @@ def server(input, output, session):
                 )
             )
         return ui.div({"class": "historical-table-card historical-results-table-card"}, ui.tags.table({"class": "historical-table"}, ui.tags.thead(ui.tags.tr(*[ui.tags.th(x) for x in ["Player", "Conf", "Pos", "Archetype", "MPG", "PPG", "APG", "RPG", "BPM", "Tracker"]])), ui.tags.tbody(*body)))
-
-    @output
-    @render.ui
-    def historical_current_comps_ui():
-        row = historical_row_by_id(historical_selected.get())
-        if row is None:
-            return ui.div("Select a historical player to load current 2026 comps.", class_="historical-empty")
-        comps = historical_current_comps(row)
-        cards = historical_current_comp_cards(comps)
-        if not cards:
-            return ui.div("No current-player comps are available for that historical profile yet.", class_="historical-empty")
-        return ui.div(
-            {"class": "historical-comps-card"},
-            ui.div(
-                {"class": "historical-comps-head"},
-                ui.div(
-                    ui.div("Current players most like this profile", class_="historical-comps-title"),
-                    ui.div(historical_profile_subtitle(row), class_="historical-comps-subtitle"),
-                ),
-            ),
-            ui.div({"class": "historical-comp-list"}, *cards),
-        )
 
     @output
     @render.text
