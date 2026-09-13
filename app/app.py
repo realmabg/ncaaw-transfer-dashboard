@@ -89,7 +89,7 @@ TRITON_ZONE_METRICS = [
 TRITON_SPECIAL_ARCHETYPES = {
     "stretch_big": {
         "label": "Stretch Big",
-        "note": "Height + shooting range.",
+        "note": "Men's shooting gates with a women's height cutoff: 6'1\"+, 34%+ from three on a 40%+ three-point rate.",
         "criteria": [
             {"key": "stretch_height", "col": "heightIn", "label": "Height", "scale": 1.0, "target": 73.0, "higher_is_better": True, "kind": "height"},
             {"key": "stretch_three_pct", "col": "tp", "label": "3PT%", "scale": 100.0, "target": 34.0, "higher_is_better": True},
@@ -98,7 +98,7 @@ TRITON_SPECIAL_ARCHETYPES = {
     },
     "shooter": {
         "label": "3PT Specialist",
-        "note": "High three-point volume with make-rate floor.",
+        "note": "Same as men's: 65%+ of shots from three at better than 35%.",
         "criteria": [
             {"key": "shooter_three_rate", "col": "three_share", "label": "3PA/FGA", "scale": 100.0, "target": 65.0, "higher_is_better": True},
             {"key": "shooter_three_pct", "col": "tp", "label": "3PT%", "scale": 100.0, "target": 35.0, "higher_is_better": True},
@@ -977,6 +977,27 @@ def make_triton_tab():
                             for metric in TRITON_ZONE_METRICS
                         ],
                     ),
+                    ui.div("Archetype criteria", class_="triton-more-subhead"),
+                    *[
+                        ui.div(
+                            ui.div(ui.span(archetype["label"], class_="triton-more-arch"), ui.span(archetype["note"], class_="triton-threshold-hint"), class_="triton-more-archhead"),
+                            ui.div(
+                                {"class": "triton-threshold-grid"},
+                                *[
+                                    ui.div(
+                                        {"class": "triton-threshold-field"},
+                                        ui.div(ui.span(criterion["label"], class_="triton-threshold-name"), class_="triton-threshold-head"),
+                                        ui.div(
+                                            height_str(criterion["target"]) if criterion.get("kind") == "height" else f"{criterion['target']:.0f}%",
+                                            class_="triton-threshold-static",
+                                        ),
+                                    )
+                                    for criterion in archetype["criteria"]
+                                ],
+                            ),
+                        )
+                        for archetype in TRITON_SPECIAL_ARCHETYPES.values()
+                    ],
                 ),
                 ui.tags.details(
                     {"class": "triton-more"},
