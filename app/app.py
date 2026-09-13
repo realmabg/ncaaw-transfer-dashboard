@@ -1,6 +1,7 @@
 from pathlib import Path
 import json
 import html
+import math
 
 import asttokens  # noqa: F401 - direct import lets Shinylive install this transitive dependency.
 import numpy as np
@@ -216,6 +217,164 @@ def dataset_status_text() -> str:
 def pct_display(value):
     num = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
     return "N/A" if pd.isna(num) else f"{num * 100:.1f}%"
+
+
+def make_shot_profile_pie_html(row, player_id):
+    rim_attempts = _as_float(row.get("rim_attempts_total", row.get("rim_attempted", 0)), 0)
+    mid_attempts = _as_float(row.get("mid_attempts_total", row.get("mid_attempted", 0)), 0)
+    three_attempts = _as_float(row.get("three_attempts_total", row.get("three_attempted", 0)), 0)
+    total_attempts = rim_attempts + mid_attempts + three_attempts
+    if total_attempts <= 0:
+        return ui.div("No FGA.", class_="qual-note")
+
+    def shot_slice_color(label, fg_pct):
+        thresholds = {
+            "RIM": (0.60, 0.50),
+            "3PT": (0.37, 0.32),
+            "MID": (0.42, 0.36),
+        }
+        strong_cutoff, medium_cutoff = thresholds.get(label, (0.50, 0.35))
+        if fg_pct >= strong_cutoff:
+            return "#2f855a"
+        if fg_pct >= medium_cutoff:
+            return "#d5a437"
+        return "#b95c5c"
+
+    ordered_rows = [
+        {
+            "label": "RIM",
+            "share_pct": (rim_attempts / total_attempts) * 100,
+            "fg_pct": _as_float(row.get("rim_pct"), 0),
+            "assist_pct": _as_float(row.get("rim_assisted_pct"), 0),
+        },
+        {
+            "label": "3PT",
+            "share_pct": (three_attempts / total_attempts) * 100,
+            "fg_pct": _as_float(row.get("tp"), 0),
+            "assist_pct": _as_float(row.get("three_assisted_pct"), 0),
+        },
+        {
+            "label": "MID",
+            "share_pct": (mid_attempts / total_attempts) * 100,
+            "fg_pct": _as_float(row.get("mid_pct"), 0),
+            "assist_pct": _as_float(row.get("mid_assisted_pct"), 0),
+        },
+    ]
+    segments = [segment for segment in ordered_rows if segment["share_pct"] > 0.05]
+
+    size_w = 280
+    size_h = 240
+    cx = 140
+    cy = 120
+    radius = 92
+    inside_label_threshold = 8.0
+
+    def polar(angle_deg, r):
+        angle = math.radians(angle_deg - 90)
+        return cx + r * math.cos(angle), cy + r * math.sin(angle)
+
+    def slice_path(start_deg, end_deg):
+        start_x, start_y = polar(end_deg, radius)
+        end_x, end_y = polar(start_deg, radius)
+        large_arc = 1 if (end_deg - start_deg) > 180 else 0
+        return (
+            f"M {cx:.2f} {cy:.2f} "
+            f"L {start_x:.2f} {start_y:.2f} "
+            f"A {radius:.2f} {radius:.2f} 0 {large_arc} 0 {end_x:.2f} {end_y:.2f} Z"
+        )
+
+    rim_segment = next((segment for segment in segments if segment["label"] == "RIM"), None)
+    start_angle = -(rim_segment["share_pct"] / 100) * 180 if rim_segment else 0
+    default_readout = "Hover a slice for shot details."
+    svg_parts = [
+        '<div class="shot-pie-wrap">',
+        '<div class="shot-pie-readout">'
+        f'{html.escape(default_readout)}</div>',
+        f'<svg viewBox="0 0 {size_w} {size_h}" width="100%" height="100%" '
+        'xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Shot profile pie chart">'
+    ]
+
+    if len(segments) == 1:
+        segment = segments[0]
+        label = segment["label"]
+        fg_pct = segment["fg_pct"]
+        assist_pct = segment["assist_pct"]
+        hover = (
+            f"{label} · 100.0% of FGA · "
+            f"{fg_pct * 100:.1f}% FG · {assist_pct * 100:.1f}% assisted"
+        )
+        hover_attr = html.escape(hover, quote=True)
+        default_attr = html.escape(default_readout, quote=True)
+        svg_parts.append(
+            f'<circle cx="{cx}" cy="{cy}" r="{radius}" fill="{shot_slice_color(label, fg_pct)}" '
+            'stroke="#f4ead4" stroke-width="2" '
+            f'data-tip="{hover_attr}" '
+            'onmousemove="const readout=this.closest(\'.shot-pie-wrap\')?.querySelector(\'.shot-pie-readout\');if(readout){readout.textContent=this.dataset.tip;}" '
+            f'onmouseleave="const readout=this.closest(\'.shot-pie-wrap\')?.querySelector(\'.shot-pie-readout\');if(readout){{readout.textContent=\'{default_attr}\';}}">'
+            f"<title>{html.escape(hover)}</title>"
+            "</circle>"
+        )
+        svg_parts.append(
+            f'<text x="{cx:.2f}" y="{cy:.2f}" fill="#ffffff" font-size="13" '
+            'font-family="Inter, sans-serif" font-weight="700" '
+            'text-anchor="middle" dominant-baseline="middle">'
+            f"{html.escape(label)}</text>"
+        )
+        svg_parts.append("</svg></div>")
+        return ui.HTML("".join(svg_parts))
+
+    current_angle = start_angle
+    default_attr = html.escape(default_readout, quote=True)
+    for segment in segments:
+        label = segment["label"]
+        share_pct = segment["share_pct"]
+        sweep = (share_pct / 100) * 360
+        end_angle = current_angle + sweep
+        path = slice_path(current_angle, end_angle)
+        fg_pct = segment["fg_pct"]
+        assist_pct = segment["assist_pct"]
+        hover = (
+            f"{label} · {share_pct:.1f}% of FGA · "
+            f"{fg_pct * 100:.1f}% FG · {assist_pct * 100:.1f}% assisted"
+        )
+        hover_attr = html.escape(hover, quote=True)
+        svg_parts.append(
+            f'<path d="{path}" fill="{shot_slice_color(label, fg_pct)}" stroke="#f4ead4" stroke-width="2" '
+            f'data-tip="{hover_attr}" '
+            'onmousemove="const readout=this.closest(\'.shot-pie-wrap\')?.querySelector(\'.shot-pie-readout\');if(readout){readout.textContent=this.dataset.tip;}" '
+            f'onmouseleave="const readout=this.closest(\'.shot-pie-wrap\')?.querySelector(\'.shot-pie-readout\');if(readout){{readout.textContent=\'{default_attr}\';}}">'
+            f"<title>{html.escape(hover)}</title>"
+            "</path>"
+        )
+
+        mid_angle = current_angle + sweep / 2
+        if share_pct >= inside_label_threshold:
+            tx, ty = polar(mid_angle, radius * 0.58)
+            svg_parts.append(
+                f'<text x="{tx:.2f}" y="{ty:.2f}" fill="#ffffff" font-size="13" '
+                'font-family="Inter, sans-serif" font-weight="700" '
+                'text-anchor="middle" dominant-baseline="middle">'
+                f"{html.escape(label)}</text>"
+            )
+        else:
+            inner_x, inner_y = polar(mid_angle, radius * 1.04)
+            callout_x_raw, callout_y = polar(mid_angle, radius * 1.22)
+            direction = 1 if callout_x_raw >= cx else -1
+            callout_x = max(32, min(248, callout_x_raw + (direction * 14)))
+            anchor = "start" if direction > 0 else "end"
+            svg_parts.append(
+                f'<path d="M {inner_x:.2f} {inner_y:.2f} L {callout_x:.2f} {callout_y:.2f}" '
+                'stroke="#f4ead4" stroke-width="1.5" fill="none" />'
+            )
+            svg_parts.append(
+                f'<text x="{callout_x:.2f}" y="{callout_y:.2f}" fill="#ffffff" font-size="12" '
+                'font-family="Inter, sans-serif" font-weight="700" '
+                f'text-anchor="{anchor}" dominant-baseline="middle">{html.escape(label)}</text>'
+            )
+        current_angle = end_angle
+
+    svg_parts.append("</svg></div>")
+    return ui.HTML("".join(svg_parts))
 
 
 def _as_float(value, default=np.nan):
@@ -1453,11 +1612,20 @@ def make_detail_modal(player_id, frame, league_avg_map, similar_fn, watchlist, s
             ui.div("vs. League Average ", ui.span("unweighted mean, all WBB D-I players", class_="sub"), class_="col-title"),
             *bars,
             ui.div(ui.tags.b("Bar", style="color:var(--ink-2)"), " = player value.  ", ui.tags.b("Tick", style="color:var(--ink-2)"), " = league mean.", class_="bar-note"),
-            ui.div("Shot Profile", ui.span("share · FG% · assisted%", class_="sub"), class_="col-title"),
-            ui.div({"class": "shot-profile-grid"}, *[
-                ui.div({"class": "shot-profile-card"}, ui.div(label, class_="k"), ui.div(pct_display(share), class_="v"), ui.div(f"{pct_display(pct)} FG · {pct_display(ast)} assisted", class_="s"))
-                for label, share, pct, ast in shot_cards
-            ]),
+            ui.div(
+                ui.div("Shot Profile", ui.span("share · FG% · assisted%", class_="sub"), class_="col-title"),
+                ui.div(
+                    {"class": "shot-profile-shell"},
+                    ui.div({"class": "shot-profile-pie"}, make_shot_profile_pie_html(row, player_id)),
+                    ui.div(
+                        {"class": "shot-profile-assists"},
+                        *[
+                            ui.div({"class": "shot-profile-card"}, ui.div(label, class_="k"), ui.div(pct_display(share), class_="v"), ui.div(f"{pct_display(pct)} FG · {pct_display(ast)} assisted", class_="s"))
+                            for label, share, pct, ast in shot_cards
+                        ],
+                    ),
+                ),
+            ),
         ),
         ui.div(
             {"class": "detail-col"},
