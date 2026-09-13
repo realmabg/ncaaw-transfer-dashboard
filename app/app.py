@@ -300,6 +300,29 @@ def tracker_comp_rows(row, comps, board_index=0):
     return rows
 
 
+def historical_current_comp_cards(comps):
+    if not comps:
+        return []
+    cards = []
+    for comp in comps:
+        badge_color = ARCHETYPE_COLOR.get(comp.get("primary_archetype", ""), position_color(comp.get("pos", "")))
+        cards.append(
+            ui.div(
+                {"class": "historical-comp-card", "onclick": f"Shiny.setInputValue('d1_select_similar',{json.dumps(str(comp['id']))},{{priority:'event'}})"},
+                ui.div(f"{comp['rank']:02d}", class_="historical-comp-rank"),
+                ui.div(comp["name"], class_="historical-comp-name"),
+                ui.div(
+                    ui.span(comp.get("primary_archetype", ""), class_="pos-badge", style=f"color:{badge_color};border-color:{badge_color}"),
+                    ui.span(comp["team"]),
+                    ui.span(f"· {comp['cls']}") if comp.get("cls") else ui.span(),
+                    class_="historical-comp-meta",
+                ),
+                ui.div(f"distance {_as_float(comp.get('distance'), 0):.2f}", class_="historical-comp-distance"),
+            )
+        )
+    return cards
+
+
 def tracker_ideal_card(row, board_index=0, saved=False):
     row_id = str(row.get("season_player_id", ""))
     comps = historical_current_comps(row, n=HISTORICAL_TRACKER_COMP_LIMIT)
@@ -1648,25 +1671,19 @@ def server(input, output, session):
         if row is None:
             return ui.div("Select a historical player to load current 2026 comps.", class_="historical-empty")
         comps = historical_current_comps(row)
-        cards = [
-            ui.div(
-                {"class": "comp-card", "onclick": f"Shiny.setInputValue('d1_select_similar','{comp['id']}',{{priority:'event'}})"},
-                ui.div(f"{comp['rank']:02d}", class_="comp-rank"),
-                ui.div(ui.div(comp["name"], class_="comp-name"), ui.div(f"{comp['team']} · {comp['cls']} · {comp['primary_archetype']}", class_="table-meta")),
-                ui.div(f"{comp['similarity_score']:.0f}", class_="comp-score"),
-            )
-            for comp in comps
-        ]
+        cards = historical_current_comp_cards(comps)
+        if not cards:
+            return ui.div("No current-player comps are available for that historical profile yet.", class_="historical-empty")
         return ui.div(
             {"class": "historical-comps-card"},
             ui.div(
                 {"class": "historical-comps-head"},
                 ui.div(
                     ui.div("Current players most like this profile", class_="historical-comps-title"),
-                    ui.div(f"{row['player_name']} · {historical_profile_subtitle(row)}", class_="historical-comps-subtitle"),
+                    ui.div(historical_profile_subtitle(row), class_="historical-comps-subtitle"),
                 ),
             ),
-            ui.div({"class": "historical-comp-list comp-grid"}, *cards),
+            ui.div({"class": "historical-comp-list"}, *cards),
         )
 
     @output
