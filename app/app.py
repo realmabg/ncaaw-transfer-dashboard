@@ -685,7 +685,6 @@ def make_similarity_compare_modal(source_profile, target_profile, comparison_ori
     )
 
     source_id = str(source_profile.get("player_id", "") or "")
-    target_id = str(target_profile.get("player_id", "") or "")
     footer_buttons = []
     if source_id:
         footer_buttons.append(
@@ -700,37 +699,6 @@ def make_similarity_compare_modal(source_profile, target_profile, comparison_ori
                 "Back to player",
             )
         )
-    if target_id:
-        footer_buttons.append(
-            ui.tags.button(
-                {
-                    "class": "pill-btn",
-                    "onclick": (
-                        "window.__compareModalNavigating = true;"
-                        f"Shiny.setInputValue('modal_compare_open_target',{json.dumps(target_id)},{{priority:'event'}})"
-                    ),
-                },
-                "Open compared player",
-            )
-        )
-    target_action = (
-        ui.div(
-            ui.tags.button(
-                {
-                    "class": "pill-btn active compare-primary-action",
-                    "onclick": (
-                        "window.__compareModalNavigating = true;"
-                        f"Shiny.setInputValue('modal_compare_open_target',{json.dumps(target_id)},{{priority:'event'}})"
-                    ),
-                },
-                "Open Compared Player Full Stats",
-            ),
-            class_="compare-action-row",
-        )
-        if target_id
-        else ui.div()
-    )
-
     title_note = "Current comps profile view" if comparison_origin == "current" else "Historical comps profile view"
     body = ui.div(
         {"id": "compare-detail-body"},
@@ -764,16 +732,6 @@ def make_similarity_compare_modal(source_profile, target_profile, comparison_ori
                 ui.div(
                     ui.div(
                         ui.div(profile["player_name"], class_="compare-player-name"),
-                        ui.tags.button(
-                            {
-                                "class": "pill-btn compare-player-inline-btn",
-                                "onclick": (
-                                    "window.__compareModalNavigating = true;"
-                                    f"Shiny.setInputValue('modal_compare_open_target',{json.dumps(str(profile.get('player_id', '') or ''))},{{priority:'event'}})"
-                                ),
-                            },
-                            "Full stats",
-                        ) if idx == 1 and str(profile.get("player_id", "") or "") else ui.div(),
                         class_="compare-player-head",
                     ),
                     ui.div(profile.get("subtitle", ""), class_="compare-player-sub"),
@@ -783,7 +741,6 @@ def make_similarity_compare_modal(source_profile, target_profile, comparison_ori
                 for idx, profile in enumerate(profiles)
             ],
         ),
-        target_action,
         ui.div({"class": "compare-modal-shell"}, missing_note, pc_section, *sections),
     )
     return ui.modal(
@@ -2542,17 +2499,6 @@ def server(input, output, session):
     @reactive.event(input.modal_compare_back)
     def _modal_compare_back():
         pid = str(input.modal_compare_back() or "").strip()
-        if not pid:
-            return
-        d1_sel.set(pid)
-        ui.modal_remove()
-        import random
-        modal_req.set((pid, random.random()))
-
-    @reactive.effect
-    @reactive.event(input.modal_compare_open_target)
-    def _modal_compare_open_target():
-        pid = str(input.modal_compare_open_target() or "").strip()
         if not pid:
             return
         d1_sel.set(pid)
