@@ -34,6 +34,7 @@ HISTORICAL_PATH = (
 HISTORICAL = pd.read_csv(HISTORICAL_PATH) if HISTORICAL_PATH.exists() else pd.DataFrame()
 HISTORICAL_TABLE_LIMIT = 25
 HISTORICAL_CURRENT_LIMIT = 8
+HISTORICAL_TRACKER_COMP_LIMIT = 5
 TRITON_DEFAULT_MIN_MPG = 10.0
 TRITON_DEFAULT_MIN_GP = 5
 TRITON_TABLE_LIMITS = {"25": "Top 25", "50": "Top 50", "100": "Top 100", "all": "All"}
@@ -231,6 +232,124 @@ def historical_row_by_id(row_id):
         return None
     rows = HISTORICAL[HISTORICAL["season_player_id"].astype(str).eq(str(row_id))]
     return None if rows.empty else rows.iloc[0]
+
+
+def historical_profile_subtitle(row):
+    if row is None:
+        return ""
+    parts = [
+        str(row.get("team", "")).strip(),
+        str(int(_as_float(row.get("year"), 0))) if np.isfinite(_as_float(row.get("year"), np.nan)) else "",
+        str(row.get("pos", "")).strip(),
+        str(row.get("archetype", "")).strip(),
+    ]
+    return " · ".join([part for part in parts if part])
+
+
+def historical_metric(row, col, fmt="{:.1f}", default="N/A"):
+    value = _as_float(row.get(col), np.nan) if row is not None else np.nan
+    return default if not np.isfinite(value) else fmt.format(value)
+
+
+def tracker_default_rows(limit=3):
+    if HISTORICAL.empty or "team" not in HISTORICAL.columns:
+        return []
+    rows = HISTORICAL[HISTORICAL["team"].astype(str).eq("UC San Diego")].copy()
+    if rows.empty:
+        return []
+    rows["__year"] = pd.to_numeric(rows.get("year"), errors="coerce")
+    rows["__bpm"] = pd.to_numeric(rows.get("bpm"), errors="coerce")
+    rows["__mpg"] = pd.to_numeric(rows.get("mins_per_game"), errors="coerce")
+    rows = rows[rows["__mpg"].fillna(0) >= 10]
+    rows = rows.sort_values(["__year", "__bpm", "__mpg"], ascending=[False, False, False]).head(limit)
+    return [row for _, row in rows.iterrows()]
+
+
+def tracker_table_head():
+    return ui.div(
+        {"class": "similarity-beta-table-head"},
+        ui.div("#"),
+        ui.div("Δ"),
+        ui.div("Current player"),
+        ui.div("PPG"),
+        ui.div("APG"),
+        ui.div("RPG"),
+    )
+
+
+def tracker_comp_rows(row, comps, board_index=0):
+    if not comps:
+        return [ui.div("No current-player comps available for this historical profile.", class_="similarity-beta-empty")]
+    rows = []
+    for comp in comps:
+        rows.append(
+            ui.div(
+                {"class": "similarity-beta-row similarity-beta-row--clickable", "onclick": f"Shiny.setInputValue('d1_select_similar',{json.dumps(str(comp['id']))},{{priority:'event'}})"},
+                ui.div(str(comp["rank"]), class_="similarity-beta-rank"),
+                ui.div("-", class_="similarity-beta-move flat"),
+                ui.div(
+                    {"class": "similarity-beta-player-cell"},
+                    ui.div(comp["name"], class_="similarity-beta-player"),
+                    ui.div(f"{comp['team']} · {comp['cls']} · {comp['primary_archetype']}", class_="similarity-beta-team"),
+                ),
+                ui.div(f"{_as_float(comp.get('ppg'), 0):.1f}", class_="similarity-beta-stat"),
+                ui.div(f"{_as_float(comp.get('apg'), 0):.1f}", class_="similarity-beta-stat"),
+                ui.div(f"{_as_float(comp.get('rpg'), 0):.1f}", class_="similarity-beta-stat"),
+            )
+        )
+    return rows
+
+
+def tracker_ideal_card(row, board_index=0, saved=False):
+    row_id = str(row.get("season_player_id", ""))
+    comps = historical_current_comps(row, n=HISTORICAL_TRACKER_COMP_LIMIT)
+    return ui.div(
+        {"class": "similarity-beta-card"},
+        ui.div(
+            {"class": "similarity-beta-card-head"},
+            ui.div(
+                ui.div(str(row.get("player_name", "Unknown player")), class_="similarity-beta-ideal-name"),
+                ui.div(historical_profile_subtitle(row), class_="similarity-beta-ideal-meta"),
+            ),
+            ui.div("Saved" if saved else "Ideal", class_="similarity-beta-pill"),
+        ),
+        ui.div(
+            {"class": "similarity-beta-ideal-stats"},
+            ui.div(ui.span("HT"), ui.tags.b(height_str(_as_float(row.get("height_inches"), 0)))),
+            ui.div(ui.span("PPG"), ui.tags.b(historical_metric(row, "pts_per_game"))),
+            ui.div(ui.span("APG"), ui.tags.b(historical_metric(row, "ast_per_game"))),
+            ui.div(ui.span("RPG"), ui.tags.b(historical_metric(row, "treb_per_game"))),
+        ),
+        tracker_table_head(),
+        ui.div({"class": "similarity-beta-table"}, *tracker_comp_rows(row, comps, board_index)),
+        ui.tags.button(
+            "Open in Historical",
+            class_="similarity-beta-more",
+            onclick=f"Shiny.setInputValue('hist_select_row',{json.dumps(row_id)},{{priority:'event'}});switchTab('hist');",
+        ),
+    )
+
+
+def make_tracker_content(saved_ids):
+    pinned = tracker_default_rows()
+    pinned_ids = {str(row.get("season_player_id", "")) for row in pinned}
+    saved_rows = [historical_row_by_id(row_id) for row_id in sorted(saved_ids) if str(row_id) not in pinned_ids]
+    saved_rows = [row for row in saved_rows if row is not None]
+    return ui.div(
+        {"class": "similarity-beta-shell"},
+        ui.div(
+            {"class": "similarity-beta-topbar"},
+            ui.div(
+                ui.div("Triton Tracker", class_="similarity-beta-title"),
+                ui.div("Save historical UCSD ideals, then rank the current women's D-I pool with the historical-to-current similarity model.", class_="similarity-beta-subtitle"),
+            ),
+            ui.div("Current pool: 2026 WBB D-I", class_="similarity-beta-refresh-note"),
+        ),
+        ui.div({"class": "similarity-beta-section-head"}, ui.div("Pinned UCSD ideals"), ui.div("Always shown", class_="similarity-beta-section-count")),
+        ui.div({"class": "similarity-beta-grid"}, *[tracker_ideal_card(row, i) for i, row in enumerate(pinned)]) if pinned else ui.div("No UC San Diego historical ideals found in the 2021-25 data.", class_="similarity-beta-tracked-empty"),
+        ui.div({"class": "similarity-beta-section-head"}, ui.div("Saved historical ideals"), ui.div(f"{len(saved_rows)} saved", class_="similarity-beta-section-count")),
+        ui.div({"class": "similarity-beta-grid"}, *[tracker_ideal_card(row, i, saved=True) for i, row in enumerate(saved_rows)]) if saved_rows else ui.div("Save players from Historical Players to add custom tracker ideals.", class_="similarity-beta-tracked-empty"),
+    )
 
 
 def triton_metric_display(metric, row):
@@ -898,6 +1017,10 @@ def make_detail_modal(player_id, frame, league_avg_map, similar_fn, watchlist, s
 def make_historical_tab():
     height_min, height_max = historical_slider_range("height_inches", 1, (58, 78))
     mpg_min, mpg_max = historical_slider_range("mins_per_game", .5, (0, 38))
+    ppg_min, ppg_max = historical_slider_range("pts_per_game", .5, (0, 30))
+    apg_min, apg_max = historical_slider_range("ast_per_game", .5, (0, 10))
+    rpg_min, rpg_max = historical_slider_range("treb_per_game", .5, (0, 15))
+    bpm_min, bpm_max = historical_slider_range("bpm", .5, (-20, 20))
     years = sorted(pd.to_numeric(HISTORICAL.get("year", pd.Series(dtype=float)), errors="coerce").dropna().astype(int).unique().tolist())
     confs = sorted(HISTORICAL.get("conf", pd.Series(dtype=object)).dropna().astype(str).unique().tolist())
     teams = sorted(HISTORICAL.get("team", pd.Series(dtype=object)).dropna().astype(str).unique().tolist())
@@ -921,8 +1044,19 @@ def make_historical_tab():
                     ui.div({"class": "historical-filter-field historical-filter-field--slider"}, ui.div("Height range", class_="historical-filter-title"), ui.input_slider("hist_height", None, min=int(height_min), max=int(height_max), value=[int(height_min), int(height_max)], step=1)),
                     ui.div({"class": "historical-filter-field historical-filter-field--slider"}, ui.div("Minutes minimum", class_="historical-filter-title"), ui.input_slider("hist_mpg", None, min=float(mpg_min), max=float(mpg_max), value=max(5.0, float(mpg_min)), step=.5)),
                 ),
+                ui.tags.details(
+                    {"class": "historical-more-filters"},
+                    ui.tags.summary("Additional filters"),
+                    ui.div(
+                        {"class": "historical-filter-row historical-filter-row--additional"},
+                        ui.div({"class": "historical-filter-field historical-filter-field--slider"}, ui.div("Points minimum", class_="historical-filter-title"), ui.input_slider("hist_ppg_min", None, min=float(ppg_min), max=float(ppg_max), value=float(ppg_min), step=.5)),
+                        ui.div({"class": "historical-filter-field historical-filter-field--slider"}, ui.div("Assists minimum", class_="historical-filter-title"), ui.input_slider("hist_apg_min", None, min=float(apg_min), max=float(apg_max), value=float(apg_min), step=.5)),
+                        ui.div({"class": "historical-filter-field historical-filter-field--slider"}, ui.div("Rebounds minimum", class_="historical-filter-title"), ui.input_slider("hist_rpg_min", None, min=float(rpg_min), max=float(rpg_max), value=float(rpg_min), step=.5)),
+                        ui.div({"class": "historical-filter-field historical-filter-field--slider"}, ui.div("BPM minimum", class_="historical-filter-title"), ui.input_slider("hist_bpm_min", None, min=float(bpm_min), max=float(bpm_max), value=float(bpm_min), step=.5)),
+                    ),
+                ),
             ),
-            ui.div({"class": "historical-results-head"}, ui.output_text("hist_results_count"), ui.div("Click a row to rank the current 2026 WBB pool against that historical profile.", class_="historical-results-note")),
+            ui.div({"class": "historical-results-head"}, ui.output_text("hist_results_count"), ui.div("Click a row to open a profile and load current-player comps.", class_="historical-results-note")),
             ui.output_ui("historical_table_ui"),
             ui.output_ui("historical_current_comps_ui"),
         ),
@@ -1025,11 +1159,7 @@ def make_triton_tab():
 def make_tracker_tab():
     return ui.div(
         {"id": "tracker-tab", "class": "tab-panel"},
-        ui.div(
-            {"class": "historical-shell tracker-shell"},
-            ui.div({"class": "historical-header-card"}, ui.div("Triton Tracker", class_="historical-title"), ui.div("Save historical ideals, then compare the current 2026 WBB pool against those profiles.", class_="historical-results-note")),
-            ui.output_ui("tracker_ui"),
-        ),
+        ui.output_ui("tracker_ui"),
     )
 
 
@@ -1402,6 +1532,10 @@ def server(input, output, session):
         lo, hi = input.hist_height()
         d = d[(pd.to_numeric(d["height_inches"], errors="coerce") >= lo) & (pd.to_numeric(d["height_inches"], errors="coerce") <= hi)]
         d = d[pd.to_numeric(d["mins_per_game"], errors="coerce").fillna(0) >= float(input.hist_mpg())]
+        d = d[pd.to_numeric(d["pts_per_game"], errors="coerce").fillna(0) >= float(input.hist_ppg_min())]
+        d = d[pd.to_numeric(d["ast_per_game"], errors="coerce").fillna(0) >= float(input.hist_apg_min())]
+        d = d[pd.to_numeric(d["treb_per_game"], errors="coerce").fillna(0) >= float(input.hist_rpg_min())]
+        d = d[pd.to_numeric(d["bpm"], errors="coerce").fillna(-999) >= float(input.hist_bpm_min())]
         return d.sort_values(["year", "bpm", "mins_per_game"], ascending=[False, False, False]).head(HISTORICAL_TABLE_LIMIT)
 
     @reactive.calc
@@ -1523,7 +1657,17 @@ def server(input, output, session):
             )
             for comp in comps
         ]
-        return ui.div({"class": "comp-panel"}, ui.div(f"Current 2026 players most like {row['player_name']} ({int(row['year'])})", class_="panel-title"), ui.div({"class": "comp-grid"}, *cards))
+        return ui.div(
+            {"class": "historical-comps-card"},
+            ui.div(
+                {"class": "historical-comps-head"},
+                ui.div(
+                    ui.div("Current players most like this profile", class_="historical-comps-title"),
+                    ui.div(f"{row['player_name']} · {historical_profile_subtitle(row)}", class_="historical-comps-subtitle"),
+                ),
+            ),
+            ui.div({"class": "historical-comp-list comp-grid"}, *cards),
+        )
 
     @output
     @render.text
@@ -1580,21 +1724,7 @@ def server(input, output, session):
     @output
     @render.ui
     def tracker_ui():
-        ids = sorted(tracker_ids.get())
-        if not ids:
-            return ui.div("Save players from Historical Players to build a Triton Tracker board.", class_="historical-empty")
-        panels = []
-        for row_id in ids:
-            row = historical_row_by_id(row_id)
-            if row is None:
-                continue
-            comps = historical_current_comps(row, n=5)
-            cards = [
-                ui.div({"class": "tracker-row", "onclick": f"Shiny.setInputValue('d1_select_similar','{comp['id']}',{{priority:'event'}})"}, ui.span(f"{comp['rank']:02d}"), ui.span(comp["name"]), ui.span(comp["team"]), ui.tags.b(f"{comp['similarity_score']:.0f}"))
-                for comp in comps
-            ]
-            panels.append(ui.div({"class": "tracker-card"}, ui.div(ui.div(row["player_name"], class_="panel-title"), ui.div(f"{row['team']} · {int(row['year'])} · {row['archetype']}", class_="table-meta")), *cards))
-        return ui.div({"class": "tracker-grid"}, *panels)
+        return make_tracker_content(tracker_ids.get())
 
     @output
     @render.ui
