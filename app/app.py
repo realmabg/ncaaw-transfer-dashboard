@@ -713,6 +713,23 @@ def make_similarity_compare_modal(source_profile, target_profile, comparison_ori
                 "Open compared player",
             )
         )
+    target_action = (
+        ui.div(
+            ui.tags.button(
+                {
+                    "class": "pill-btn active compare-primary-action",
+                    "onclick": (
+                        "window.__compareModalNavigating = true;"
+                        f"Shiny.setInputValue('modal_compare_open_target',{json.dumps(target_id)},{{priority:'event'}})"
+                    ),
+                },
+                "Open Compared Player Full Stats",
+            ),
+            class_="compare-action-row",
+        )
+        if target_id
+        else ui.div()
+    )
 
     title_note = "Current comps profile view" if comparison_origin == "current" else "Historical comps profile view"
     body = ui.div(
@@ -766,6 +783,7 @@ def make_similarity_compare_modal(source_profile, target_profile, comparison_ori
                 for idx, profile in enumerate(profiles)
             ],
         ),
+        target_action,
         ui.div({"class": "compare-modal-shell"}, missing_note, pc_section, *sections),
     )
     return ui.modal(

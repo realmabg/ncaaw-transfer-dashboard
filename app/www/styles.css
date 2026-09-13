@@ -1606,6 +1606,19 @@ html, body {
   white-space:nowrap;
   flex:0 0 auto;
 }
+.compare-action-row {
+  display:flex;
+  justify-content:flex-end;
+  margin:-2px 0 14px;
+}
+.compare-primary-action {
+  min-height:42px;
+  border-radius:0;
+  padding:11px 16px;
+  font-family:var(--mono);
+  font-size:12px;
+  letter-spacing:.12em;
+}
 .compare-player-sub {
   color:var(--ink-3);
   font-size:12px;
@@ -1666,6 +1679,14 @@ html, body {
   font-weight:700;
   letter-spacing:.10em;
   text-transform:uppercase;
+}
+.modal-footer:has(.compare-footer) {
+  display:flex !important;
+  justify-content:flex-end;
+  gap:10px;
+  border-top:1px solid var(--rule);
+  padding:12px 18px !important;
+  background:var(--bg) !important;
 }
 .similarity-input-section {
   margin-bottom:14px;
