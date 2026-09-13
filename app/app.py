@@ -39,6 +39,8 @@ TRITON_DEFAULT_MIN_MPG = 10.0
 TRITON_DEFAULT_MIN_GP = 5
 TRITON_TABLE_LIMITS = {"25": "Top 25", "50": "Top 50", "100": "Top 100", "all": "All"}
 UCSD_WBB_ROSTER_URL = "https://ucsdtritons.com/sports/womens-basketball/roster"
+WATCHLIST_STORAGE_KEY = "ucsd_wbb_watchlist_player_ids_v1"
+TRITON_TRACKER_STORAGE_KEY = "ucsd_wbb_triton_tracker_historical_ids_v1"
 
 POSITION_GROUPS = {
     "G": {"label": "Guard", "members": {"G"}, "color": POS_COLOR["G"]},
@@ -592,7 +594,7 @@ def make_historical_detail_modal(row, saved_ids):
                     ui.tags.button(
                         "Saved to Tracker" if saved else "Save to Tracker",
                         class_="triton-tracker-toggle is-tracked" if saved else "triton-tracker-toggle",
-                        onclick=f"Shiny.setInputValue('tracker_toggle',{json.dumps(row_id)},{{priority:'event'}})",
+                        onclick=f"window.ucsdToggleTritonTracker ? window.ucsdToggleTritonTracker({json.dumps(row_id)}, this) : Shiny.setInputValue('tracker_toggle',{json.dumps(row_id)},{{priority:'event'}})",
                     ),
                     class_="historical-profile-actions",
                 ),
@@ -653,11 +655,43 @@ def tracker_ideal_card(row, board_index=0, saved=False):
         ),
         tracker_table_head(),
         ui.div({"class": "similarity-beta-table"}, *tracker_comp_rows(row, comps, board_index)),
-        ui.tags.button(
-            "Open in Historical",
-            class_="similarity-beta-more",
-            onclick=f"switchTab('hist');window.ucsdOpenHistoricalProfile ? window.ucsdOpenHistoricalProfile({json.dumps(row_id)}) : Shiny.setInputValue('hist_select_row',{json.dumps(row_id)},{{priority:'event'}});",
+        ui.div(
+            {"class": "similarity-beta-actions"},
+            ui.tags.button(
+                "View longer list",
+                class_="similarity-beta-more",
+                onclick=f"Shiny.setInputValue('tracker_open_long_list',{json.dumps(row_id)},{{priority:'event'}})",
+            ),
+            ui.tags.button(
+                "Open in Historical",
+                class_="similarity-beta-more similarity-beta-more--secondary",
+                onclick=f"switchTab('hist');window.ucsdOpenHistoricalProfile ? window.ucsdOpenHistoricalProfile({json.dumps(row_id)}) : Shiny.setInputValue('hist_select_row',{json.dumps(row_id)},{{priority:'event'}});",
+            ),
         ),
+    )
+
+
+def make_tracker_long_list_modal(source_id):
+    row = historical_row_by_id(source_id)
+    if row is None:
+        return None
+    comps = historical_current_comps(row, n=25)
+    body = ui.div(
+        {"class": "similarity-beta-long-list"},
+        ui.div(
+            ui.div(str(row.get("player_name", "Unknown player")), class_="similarity-beta-ideal-name"),
+            ui.div(historical_profile_subtitle(row), class_="similarity-beta-ideal-meta"),
+            class_="similarity-beta-long-head",
+        ),
+        tracker_table_head(),
+        ui.div({"class": "similarity-beta-table similarity-beta-table--long"}, *tracker_comp_rows(row, comps, 0)),
+    )
+    return ui.modal(
+        body,
+        title=ui.HTML(f"Longer Similarity List <b>· {html.escape(str(row.get('player_name', 'Unknown player')))}</b>"),
+        easy_close=True,
+        size="l",
+        footer=None,
     )
 
 
@@ -1669,6 +1703,102 @@ app_ui = ui.page_fluid(
             }, true);
             """
         ),
+        ui.tags.script(f"""
+            (function() {{
+                var KEY = {json.dumps(WATCHLIST_STORAGE_KEY)};
+                function restoreWatchlist() {{
+                    if (!window.Shiny || !window.Shiny.setInputValue || !document.body) return;
+                    if (document.body.dataset.ucsdWbbWatchlistRestored === '1') return;
+                    document.body.dataset.ucsdWbbWatchlistRestored = '1';
+                    var ids = [];
+                    try {{
+                        var raw = localStorage.getItem(KEY);
+                        if (raw) {{
+                            var parsed = JSON.parse(raw);
+                            if (Array.isArray(parsed)) {{
+                                ids = parsed.filter(function(v) {{ return typeof v === 'string'; }});
+                            }}
+                        }}
+                    }} catch (err) {{ ids = []; }}
+                    window.Shiny.setInputValue('watchlist_restore', {{ids: ids}}, {{priority: 'event'}});
+                }}
+                document.addEventListener('shiny:connected', restoreWatchlist);
+                var tries = 0;
+                var timer = window.setInterval(function() {{
+                    if (document.body && document.body.dataset.ucsdWbbWatchlistRestored === '1') {{
+                        window.clearInterval(timer);
+                        return;
+                    }}
+                    var app = window.Shiny && window.Shiny.shinyapp;
+                    var live = app && (typeof app.isConnected !== 'function' || app.isConnected());
+                    if (document.body && live && window.Shiny.setInputValue) {{
+                        restoreWatchlist();
+                        window.clearInterval(timer);
+                    }}
+                    if (++tries > 600) window.clearInterval(timer);
+                }}, 100);
+            }})();
+        """),
+        ui.tags.script(f"""
+            (function() {{
+                var KEY = {json.dumps(TRITON_TRACKER_STORAGE_KEY)};
+                function readIds() {{
+                    var ids = [];
+                    try {{
+                        var raw = localStorage.getItem(KEY);
+                        if (raw) {{
+                            var parsed = JSON.parse(raw);
+                            if (Array.isArray(parsed)) {{
+                                ids = parsed.filter(function(v) {{ return typeof v === 'string' && v.trim(); }});
+                            }}
+                        }}
+                    }} catch (err) {{ ids = []; }}
+                    return ids;
+                }}
+                function writeIds(ids) {{
+                    try {{ localStorage.setItem(KEY, JSON.stringify(ids)); }} catch (err) {{}}
+                }}
+                var lastSentIds = null;
+                function syncTritonTracker(force) {{
+                    if (!window.Shiny || !window.Shiny.setInputValue || !document.body) return;
+                    var ids = readIds();
+                    var signature = JSON.stringify(ids);
+                    if (!force && document.body.dataset.ucsdWbbTritonTrackerRestored === '1' && signature === lastSentIds) return;
+                    document.body.dataset.ucsdWbbTritonTrackerRestored = '1';
+                    lastSentIds = signature;
+                    window.Shiny.setInputValue('triton_tracker_restore', {{ids: ids, nonce: Date.now()}}, {{priority: 'event'}});
+                }}
+                window.ucsdSyncTritonTracker = syncTritonTracker;
+                window.ucsdToggleTritonTracker = function(id, button) {{
+                    if (!id) return;
+                    var ids = readIds();
+                    var idx = ids.indexOf(id);
+                    var isTracked = idx === -1;
+                    if (isTracked) ids.push(id);
+                    else ids.splice(idx, 1);
+                    writeIds(ids);
+                    if (button) {{
+                        button.classList.toggle('is-tracked', isTracked);
+                        button.textContent = isTracked ? 'Saved to Tracker' : 'Save to Tracker';
+                    }}
+                    if (window.Shiny && window.Shiny.setInputValue) {{
+                        syncTritonTracker(true);
+                        window.Shiny.setInputValue('tracker_toggle_direct', {{id: id, tracked: isTracked, nonce: Date.now()}}, {{priority: 'event'}});
+                    }}
+                }};
+                document.addEventListener('shiny:connected', function() {{ syncTritonTracker(false); }});
+                var tries = 0;
+                var timer = window.setInterval(function() {{
+                    var app = window.Shiny && window.Shiny.shinyapp;
+                    var live = app && (typeof app.isConnected !== 'function' || app.isConnected());
+                    if (document.body && live && window.Shiny.setInputValue) {{
+                        syncTritonTracker(false);
+                        tries = 0;
+                    }}
+                    if (++tries > 600) window.clearInterval(timer);
+                }}, 1000);
+            }})();
+        """),
     ),
     ui.div(
         {"id": "atlas-shell"},
@@ -1717,6 +1847,8 @@ app_ui = ui.page_fluid(
         ui.div({"id": "site-footer"}, "Women’s Division I dashboard"),
     ),
     ui.output_ui("d1_modal_trigger"),
+    ui.output_ui("watchlist_persist"),
+    ui.output_ui("triton_tracker_persist"),
 )
 
 
@@ -1731,6 +1863,8 @@ def server(input, output, session):
     modal_similarity_metric = reactive.Value("mahalanobis")
     historical_selected = reactive.Value(None)
     tracker_ids = reactive.Value(set())
+    watchlist_restored = reactive.Value(False)
+    tracker_restored = reactive.Value(False)
 
     def sync_scatter(fig, plot_df, selected_id, dimmed_arch):
         traces = build_traces(plot_df, selected_id, dimmed_arch)
@@ -1750,6 +1884,57 @@ def server(input, output, session):
             if pid not in selected:
                 selected.append(pid)
         radar_selected.set(selected)
+
+    @reactive.effect
+    @reactive.event(input.watchlist_restore)
+    def _restore_watchlist():
+        payload = input.watchlist_restore() or {}
+        stored = payload.get("ids") or [] if isinstance(payload, dict) else []
+        restored = {pid for pid, *_ in watchlist_rows(stored)}
+        watchlist.set(restored)
+        sync_radar_selection(restored)
+        watchlist_restored.set(True)
+
+    @output
+    @render.ui
+    def watchlist_persist():
+        if not watchlist_restored.get():
+            return None
+        ids_json = json.dumps(sorted(watchlist.get())).replace("</", "<\\/")
+        return ui.tags.script(f"""
+        (function() {{
+          try {{
+            localStorage.setItem({json.dumps(WATCHLIST_STORAGE_KEY)}, JSON.stringify({ids_json}));
+          }} catch (err) {{}}
+        }})();
+        """)
+
+    @reactive.effect
+    @reactive.event(input.triton_tracker_restore)
+    def _restore_triton_tracker():
+        payload = input.triton_tracker_restore() or {}
+        stored = payload.get("ids") or [] if isinstance(payload, dict) else []
+        restored = {
+            str(row_id).strip()
+            for row_id in stored
+            if historical_row_by_id(str(row_id).strip()) is not None
+        }
+        tracker_ids.set(restored)
+        tracker_restored.set(True)
+
+    @output
+    @render.ui
+    def triton_tracker_persist():
+        if not tracker_restored.get():
+            return None
+        ids_json = json.dumps(sorted(tracker_ids.get())).replace("</", "<\\/")
+        return ui.tags.script(f"""
+        (function() {{
+          try {{
+            localStorage.setItem({json.dumps(TRITON_TRACKER_STORAGE_KEY)}, JSON.stringify({ids_json}));
+          }} catch (err) {{}}
+        }})();
+        """)
 
     @reactive.effect
     @reactive.event(input.toggle_watchlist)
@@ -1824,6 +2009,32 @@ def server(input, output, session):
         curr = set(tracker_ids.get())
         curr.discard(str(row_id)) if str(row_id) in curr else curr.add(str(row_id))
         tracker_ids.set(curr)
+
+    @reactive.effect
+    @reactive.event(input.tracker_toggle_direct)
+    def _tracker_toggle_direct():
+        payload = input.tracker_toggle_direct() or {}
+        if not isinstance(payload, dict):
+            return
+        row_id = str(payload.get("id", "") or "").strip()
+        if not row_id or historical_row_by_id(row_id) is None:
+            return
+        curr = set(tracker_ids.get())
+        if bool(payload.get("tracked")):
+            curr.add(row_id)
+        else:
+            curr.discard(row_id)
+        tracker_ids.set(curr)
+
+    @reactive.effect
+    @reactive.event(input.tracker_open_long_list)
+    def _tracker_open_long_list():
+        row_id = str(input.tracker_open_long_list() or "").strip()
+        if not row_id:
+            return
+        modal = make_tracker_long_list_modal(row_id)
+        if modal is not None:
+            ui.modal_show(modal)
 
     @reactive.effect
     @reactive.event(input.triton_open_player)
