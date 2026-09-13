@@ -126,38 +126,41 @@ HISTORICAL_FEATURES = [
     ("rim_share", "rim_share", 0.3), ("mid_share", "mid_share", 0.25),
 ]
 SIMILARITY_COMPARE_CATEGORIES = [
-    ("role", "Role + Production", [
+    ("tier1", "Tier 1 · Height / Shot Type / Workload", [
         ("height_inches", "Height"),
         ("mins_per_game", "MPG"),
         ("pts_per_game", "PPG"),
-        ("treb_per_game", "RPG"),
-        ("ast_per_game", "APG"),
-        ("bpm", "BPM"),
-        ("porpag", "PORPAG"),
-    ]),
-    ("shooting", "Shooting + Shot Mix", [
         ("eFG", "eFG%"),
         ("ts", "TS%"),
         ("3P_pct", "3P%"),
         ("three_share", "3PA/FGA"),
         ("rim_share", "Rim share"),
         ("mid_share", "Mid share"),
+    ]),
+    ("tier2", "Tier 2 · How They Take Shots", [
+        ("assisted_fg_pct", "Total assisted FG%"),
+        ("three_assisted_pct", "3PT assisted%"),
+        ("rim_assisted_pct", "Rim assisted%"),
+        ("mid_assisted_pct", "Mid assisted%"),
         ("rim_pct", "Rim FG%"),
         ("mid_pct", "Mid FG%"),
     ]),
-    ("creation", "Creation + Ball Security", [
+    ("tier3", "Tier 3 · Ballhandling / Creation", [
+        ("ast_per_game", "APG"),
         ("AST_TOV", "AST/TOV"),
         ("AST_pct", "AST%"),
         ("TOV_pct", "TOV%"),
         ("three_pa_per_100", "3PA/100"),
         ("FTR", "FTR"),
     ]),
-    ("defense", "Defense + Rebounding", [
+    ("tier4", "Tier 4 · Defense / Rebounding", [
+        ("treb_per_game", "RPG"),
         ("ORB_pct", "ORB%"),
         ("DRB_pct", "DRB%"),
         ("Stl_pct", "STL%"),
         ("Blk_pct", "BLK%"),
         ("stops_per_40", "Stops/40"),
+        ("bpm", "BPM"),
     ]),
 ]
 CURRENT_TO_COMPARE_KEY = {
@@ -186,12 +189,21 @@ CURRENT_TO_COMPARE_KEY = {
     "mid_share": "mid_share",
     "rim_pct": "rim_pct",
     "mid_pct": "mid_pct",
+    "assisted_fg_pct": "assisted_fg_pct",
+    "rim_assisted_pct": "rim_assisted_pct",
+    "mid_assisted_pct": "mid_assisted_pct",
+    "three_assisted_pct": "three_assisted_pct",
     "stops_per_40": "stops_per_40",
 }
 PERCENT_COMPARE_KEYS = {
     "eFG", "ts", "3P_pct", "three_share", "rim_share", "mid_share",
     "rim_pct", "mid_pct", "AST_pct", "TOV_pct", "ORB_pct", "DRB_pct",
-    "Stl_pct", "Blk_pct",
+    "Stl_pct", "Blk_pct", "assisted_fg_pct", "rim_assisted_pct",
+    "mid_assisted_pct", "three_assisted_pct",
+}
+SIMILARITY_VIEW_LABELS = {
+    "current": "Current players",
+    "historical": "Historical comps",
 }
 
 
@@ -266,17 +278,22 @@ def historical_slider_range(column, step=1.0, fallback=(0, 1)):
     return float(np.floor(vals.min() / step) * step), float(np.ceil(vals.max() / step) * step)
 
 
-def historical_current_comps(row, n=HISTORICAL_CURRENT_LIMIT):
+def historical_current_comps(row, n=HISTORICAL_CURRENT_LIMIT, min_mpg=10.0):
     if row is None or df.empty:
         return []
     cols = [(h, c, w) for h, c, w in HISTORICAL_FEATURES if h in HISTORICAL.columns and c in df.columns]
     if not cols:
         return []
     current = df.copy()
+    if min_mpg is not None and "mpg" in current.columns:
+        mpg = pd.to_numeric(current["mpg"], errors="coerce")
+        filtered = current[mpg.fillna(0) >= float(min_mpg)]
+        if not filtered.empty:
+            current = filtered
     if "pos" in current.columns and "pos" in row:
         current = current[current["pos"].eq(row["pos"])]
         if current.empty:
-            current = df.copy()
+            current = filtered if min_mpg is not None and "filtered" in locals() and not filtered.empty else df.copy()
     score = pd.Series(0.0, index=current.index)
     weight = pd.Series(0.0, index=current.index)
     for hist_col, current_col, w in cols:
@@ -408,7 +425,33 @@ def compare_header_name(profile):
     return name if not np.isfinite(year) else f"{name} '{int(year) % 100:02d}"
 
 
-def make_similarity_compare_modal(source_profile, target_profile):
+def make_similarity_input_sections(profile):
+    sections = []
+    for _key, label, stats in SIMILARITY_COMPARE_CATEGORIES:
+        rows = []
+        for stat_key, stat_label in stats:
+            value = profile.get(stat_key)
+            if not np.isfinite(_as_float(value)):
+                continue
+            rows.append(
+                ui.div(
+                    {"class": "similarity-input-row"},
+                    ui.div(stat_label, class_="similarity-input-label"),
+                    ui.div(compare_value(stat_key, value), class_="similarity-input-value"),
+                )
+            )
+        if rows:
+            sections.append(
+                ui.div(
+                    ui.div(label, class_="compare-section-title"),
+                    *rows,
+                    class_="compare-section similarity-input-section",
+                )
+            )
+    return sections
+
+
+def make_similarity_compare_modal(source_profile, target_profile, comparison_origin="historical"):
     profiles = [source_profile, target_profile]
     grid_cols = "minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 1fr)"
     sections = []
@@ -438,6 +481,7 @@ def make_similarity_compare_modal(source_profile, target_profile):
                 )
             )
     target_id = str(target_profile.get("player_id", "") or "")
+    title_note = "Current comps profile view" if comparison_origin == "current" else "Historical comps profile view"
     body = ui.div(
         {"id": "compare-detail-body"},
         ui.div(
@@ -463,7 +507,7 @@ def make_similarity_compare_modal(source_profile, target_profile):
     )
     return ui.modal(
         body,
-        title=ui.HTML(f"Player Comparison <b>· {html.escape(source_profile['player_name'])} vs {html.escape(target_profile['player_name'])}</b>"),
+        title=ui.HTML(f"Similarity Comparison <b>· {html.escape(source_profile['player_name'])}</b> <span class='compare-title-note'>{html.escape(title_note)}</span>"),
         easy_close=True,
         size="xl",
         footer=None,
@@ -569,20 +613,7 @@ def make_historical_detail_modal(row, saved_ids):
     saved = row_id in saved_ids
     arch = str(row.get("archetype", ""))
     accent = ARCHETYPE_COLOR.get(arch, position_color(row.get("pos", "")))
-    statline = [
-        historical_stat_cell("MIN", historical_metric(row, "mins_per_game")),
-        historical_stat_cell("PTS", historical_metric(row, "pts_per_game")),
-        historical_stat_cell("REB", historical_metric(row, "treb_per_game")),
-        historical_stat_cell("AST", historical_metric(row, "ast_per_game")),
-        historical_stat_cell("STL", historical_metric(row, "stl_per_game")),
-        historical_stat_cell("BLK", historical_metric(row, "blk_per_game")),
-        historical_stat_cell("BPM", historical_metric(row, "bpm")),
-        historical_stat_cell("eFG%", historical_metric(row, "eFG", "{:.1%}")),
-        historical_stat_cell("3P%", historical_metric(row, "3P_pct", "{:.1%}")),
-        historical_stat_cell("AST/TOV", historical_metric(row, "AST_TOV")),
-        historical_stat_cell("DRB%", historical_metric(row, "DRB_pct", "{:.1%}")),
-        historical_stat_cell("3PA/FGA", historical_metric(row, "three_share", "{:.1%}")),
-    ]
+    input_sections = make_similarity_input_sections(historical_compare_profile_from_row(row))
     body = ui.div(
         {"class": "historical-profile-grid"},
         ui.div(
@@ -615,12 +646,16 @@ def make_historical_detail_modal(row, saved_ids):
         ),
         ui.div(
             {"class": "historical-profile-col historical-profile-col--stats"},
-            ui.div("Season Statline", ui.span("2021-25 historical pool", class_="sub"), class_="col-title"),
-            ui.div({"class": "statline"}, *statline),
+            ui.div("Similarity Inputs", class_="col-title"),
+            *(input_sections if input_sections else [ui.div("No similarity input rows are available for that historical profile yet.", class_="historical-empty")]),
         ),
         ui.div(
             {"class": "historical-profile-col"},
-            ui.div("Current Players Most Like This Profile", ui.span("2026 WBB D-I pool", class_="sub"), class_="col-title"),
+            ui.div(
+                ui.div("Current Player Comps", class_="col-title"),
+                ui.div("10+ MPG current pool", class_="historical-comp-control"),
+                class_="historical-comps-headline",
+            ),
             ui.div({"class": "historical-comp-list"}, *(comp_cards if comp_cards else [ui.div("No current-player comps are available for that historical profile yet.", class_="historical-empty")])),
         ),
     )
@@ -661,11 +696,6 @@ def tracker_ideal_card(row, board_index=0, saved=False):
                 "View longer list",
                 class_="similarity-beta-more",
                 onclick=f"Shiny.setInputValue('tracker_open_long_list',{json.dumps(row_id)},{{priority:'event'}})",
-            ),
-            ui.tags.button(
-                "Open in Historical",
-                class_="similarity-beta-more similarity-beta-more--secondary",
-                onclick=f"switchTab('hist');window.ucsdOpenHistoricalProfile ? window.ucsdOpenHistoricalProfile({json.dumps(row_id)}) : Shiny.setInputValue('hist_select_row',{json.dumps(row_id)},{{priority:'event'}});",
             ),
         ),
     )
@@ -1272,10 +1302,13 @@ def make_plot_area(prefix):
     )
 
 
-def make_detail_modal(player_id, frame, league_avg_map, similar_fn, watchlist, similarity_metric="mahalanobis"):
+def make_detail_modal(player_id, frame, league_avg_map, similar_fn, watchlist, similarity_metric="mahalanobis", similarity_view="current"):
     row = frame[frame["id"] == player_id].iloc[0]
     if similarity_metric not in SIMILARITY_METRIC_LABELS:
         similarity_metric = "mahalanobis"
+    if similarity_view not in SIMILARITY_VIEW_LABELS:
+        similarity_view = "current"
+    show_historical_comps = similarity_view == "historical"
     sims = similar_fn(player_id, n_sim=5, metric=similarity_metric)
     hist_comps = current_historical_comps(row, n=5)
     pc = ARCHETYPE_COLOR.get(row.get("primary_archetype"), position_color(row.get("pos", "")))
@@ -1345,9 +1378,10 @@ def make_detail_modal(player_id, frame, league_avg_map, similar_fn, watchlist, s
     for i, s in enumerate(sims):
         sim_pos = s.get("pos") or frame.loc[frame["id"] == s["id"], "pos"].iloc[0]
         sc = position_color(sim_pos)
+        payload = {"source_id": str(player_id), "target_id": str(s["id"])}
         sim_rows.append(
             ui.div(
-                {"class": "sim-row", "onclick": f"Shiny.setInputValue('d1_select_similar','{s['id']}',{{priority:'event'}})"},
+                {"class": "sim-row", "onclick": f"Shiny.setInputValue('d1_open_compare',{json.dumps(payload)},{{priority:'event'}})", "title": f"Compare {row['name']} to {s['name']}"},
                 ui.div(f"{i+1:02d}", class_="sim-rank"),
                 ui.div(ui.div(s["name"], class_="nm"), ui.div(ui.span(position_label(sim_pos), class_="pos-badge", style=f"color:{sc};border-color:{sc}"), ui.span(s["team"]), ui.span(f"· {s['cls']}", style="color:var(--ink-3)"), class_="meta"), class_="sim-main"),
                 ui.div(f"{s['similarity_score']:.0f}", ui.span("similarity score", class_="sim-lbl"), class_="sim-pct"),
@@ -1427,11 +1461,21 @@ def make_detail_modal(player_id, frame, league_avg_map, similar_fn, watchlist, s
         ),
         ui.div(
             {"class": "detail-col"},
-            ui.div("Most Similar Current Players ", ui.span(SIMILARITY_METRIC_LABELS[similarity_metric], class_="sub"), class_="col-title"),
-            ui.div(ui.input_radio_buttons("modal_similarity_metric", None, choices={"mahalanobis": "Mahalanobis", "euclidean": "Euclidean"}, selected=similarity_metric, inline=True), class_="sim-metric-control"),
-            *sim_rows,
-            ui.div("Historical-to-Current Fits", ui.span("2021-25 profile to 2026 pool", class_="sub"), class_="col-title"),
-            *(hist_rows if hist_rows else [ui.div("No historical fit rows available.", class_="qual-note")]),
+            ui.div(
+                "Most Similar Players ",
+                ui.span("2021-25 profile to 2026 pool" if show_historical_comps else SIMILARITY_METRIC_LABELS[similarity_metric], class_="sub"),
+                class_="col-title",
+            ),
+            ui.div(ui.input_radio_buttons("modal_similarity_view", None, choices=SIMILARITY_VIEW_LABELS, selected=similarity_view, inline=True), class_="sim-metric-control sim-view-control"),
+            ui.div(
+                {"style": "display:none;" if show_historical_comps else "display:block;"},
+                ui.div(ui.input_radio_buttons("modal_similarity_metric", None, choices={"mahalanobis": "Mahalanobis", "euclidean": "Euclidean"}, selected=similarity_metric, inline=True), class_="sim-metric-control"),
+                *sim_rows,
+            ),
+            ui.div(
+                {"style": "display:block;" if show_historical_comps else "display:none;"},
+                *(hist_rows if hist_rows else [ui.div("No historical fit rows available.", class_="qual-note")]),
+            ),
         ),
     )
     return ui.modal(body, title=ui.HTML(f"Player Profile <b>· {row['name']}</b> <span class='div-badge'>WBB D-I</span>"), easy_close=True, size="xl", footer=None)
@@ -1861,6 +1905,7 @@ def server(input, output, session):
     modal_req = reactive.Value(None)
     modal_player = reactive.Value(None)
     modal_similarity_metric = reactive.Value("mahalanobis")
+    modal_similarity_view = reactive.Value("current")
     historical_selected = reactive.Value(None)
     tracker_ids = reactive.Value(set())
     watchlist_restored = reactive.Value(False)
@@ -1966,7 +2011,7 @@ def server(input, output, session):
         if row.empty:
             return
         modal_player.set(pid)
-        ui.modal_show(make_detail_modal(pid, df, league_avg, similar_to_fn, watchlist.get(), modal_similarity_metric.get()))
+        ui.modal_show(make_detail_modal(pid, df, league_avg, similar_to_fn, watchlist.get(), modal_similarity_metric.get(), modal_similarity_view.get()))
 
     @reactive.effect
     @reactive.event(input.modal_similarity_metric)
@@ -1977,6 +2022,20 @@ def server(input, output, session):
         if metric == modal_similarity_metric.get():
             return
         modal_similarity_metric.set(metric)
+        pid = modal_player.get()
+        if pid:
+            import random
+            modal_req.set((pid, random.random()))
+
+    @reactive.effect
+    @reactive.event(input.modal_similarity_view)
+    def _modal_similarity_view_changed():
+        view = input.modal_similarity_view()
+        if view not in SIMILARITY_VIEW_LABELS:
+            view = "current"
+        if view == modal_similarity_view.get():
+            return
+        modal_similarity_view.set(view)
         pid = modal_player.get()
         if pid:
             import random
@@ -2085,6 +2144,26 @@ def server(input, output, session):
             ui.modal_remove()
             import random
             modal_req.set((sid, random.random()))
+
+    @reactive.effect
+    @reactive.event(input.d1_open_compare)
+    def _d1_open_compare():
+        payload = input.d1_open_compare() or {}
+        if not isinstance(payload, dict):
+            return
+        source_id = str(payload.get("source_id", "") or "").strip()
+        target_id = str(payload.get("target_id", "") or "").strip()
+        source_rows = df[df["id"].astype(str).eq(source_id)]
+        target_rows = df[df["id"].astype(str).eq(target_id)]
+        if source_rows.empty or target_rows.empty:
+            return
+        ui.modal_show(
+            make_similarity_compare_modal(
+                current_compare_profile_from_row(source_rows.iloc[0]),
+                current_compare_profile_from_row(target_rows.iloc[0]),
+                comparison_origin="current",
+            )
+        )
 
     @reactive.effect
     @reactive.event(input.hist_open_compare)
