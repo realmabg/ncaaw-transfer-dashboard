@@ -1640,7 +1640,7 @@ html, body {
   text-transform:uppercase;
 }
 .compare-stat-row {
-  padding:8px 0;
+  padding:7px 0;
   min-height:0;
   border-bottom:1px solid rgba(255,255,255,0.04);
 }
@@ -1671,14 +1671,6 @@ html, body {
   font-family:var(--mono);
   font-size:12px;
   font-weight:700;
-}
-.compare-stat-value {
-  font-family:var(--mono);
-  color:var(--ink);
-  font-size:13px;
-  font-weight:700;
-  line-height:1.2;
-  letter-spacing:0;
 }
 .compare-title-note {
   margin-left:10px;
