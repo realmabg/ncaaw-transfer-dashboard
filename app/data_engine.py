@@ -187,6 +187,8 @@ def normalize_pct_series(series) -> pd.Series:
 def empty_processed_frame() -> pd.DataFrame:
     columns = {
         "id": pd.Series(dtype="object"),
+        "season": pd.Series(dtype="float64"),
+        "season_player_id": pd.Series(dtype="object"),
         "name": pd.Series(dtype="object"),
         "team": pd.Series(dtype="object"),
         "conf": pd.Series(dtype="object"),
@@ -203,7 +205,10 @@ def empty_processed_frame() -> pd.DataFrame:
         "spg": pd.Series(dtype="float64"),
         "bpg": pd.Series(dtype="float64"),
         "tov": pd.Series(dtype="float64"),
+        "pf": pd.Series(dtype="float64"),
+        "pf_per_40": pd.Series(dtype="float64"),
         "fg": pd.Series(dtype="float64"),
+        "two_pct": pd.Series(dtype="float64"),
         "tp": pd.Series(dtype="float64"),
         "ft": pd.Series(dtype="float64"),
         "ts": pd.Series(dtype="float64"),
@@ -224,6 +229,7 @@ def empty_processed_frame() -> pd.DataFrame:
         "dreb_source": pd.Series(dtype="object"),
         "bpm": pd.Series(dtype="float64"),
         "porpag": pd.Series(dtype="float64"),
+        "low_sample_size": pd.Series(dtype="bool"),
         "primary_score_col": pd.Series(dtype="object"),
         "primary_score": pd.Series(dtype="float64"),
         "primary_archetype": pd.Series(dtype="object"),
@@ -298,6 +304,7 @@ def _normalize_position(raw: pd.DataFrame) -> pd.Series:
 
 def _normalize_frame(raw: pd.DataFrame, id_prefix: str) -> pd.DataFrame:
     df = pd.DataFrame(index=raw.index)
+    df["season"] = _numeric(raw, ["season", "year"], default=np.nan)
     raw_player_id = _first_present(raw, ["id", "player_id"])
     if raw_player_id is None:
         df["_source_id"] = [f"{id_prefix}{i}" for i in range(len(raw))]
@@ -367,6 +374,29 @@ def _normalize_frame(raw: pd.DataFrame, id_prefix: str) -> pd.DataFrame:
     df["primary_archetype"] = _pick_archetype(df)
     df = df[df["name"].str.len() > 0].copy().reset_index(drop=True)
     df["id"] = clean_text_series(df.pop("_source_id"), default="")
+    df["season_player_id"] = _text(raw.loc[df.index] if len(df.index) else raw, ["season_player_id"], default="").reset_index(drop=True)
+    df["season_player_id"] = df["season_player_id"].where(
+        df["season_player_id"].str.len() > 0,
+        df["season"].fillna("").astype(str).str.replace(".0", "", regex=False) + "_" + df["id"].astype(str),
+    )
+    passthrough_numeric = [
+        "pf", "pf_per_40", "two_pct", "ftr", "tov_pct", "adjoe", "drtg", "adrtg",
+        "dporpag", "stops_per_40", "to_pct", "ast_pct", "blk_pct", "stl_pct",
+        "ft_rate", "three_pa_per_100", "rim_share", "mid_share", "rim_pct", "mid_pct",
+        "rim_pct_of_total_attempts", "mid_pct_of_total_attempts", "three_pct_of_total_attempts",
+        "rim_assisted_pct", "mid_assisted_pct", "three_assisted_pct", "assisted_fg_pct",
+        "pbp_rim_made", "pbp_mid_made", "pbp_three_made", "rim_made_total",
+        "rim_attempts_total", "mid_attempts_total", "three_attempts_total",
+    ]
+    for col in passthrough_numeric:
+        if col not in df.columns:
+            df[col] = _numeric(raw.loc[df.index] if len(df.index) else raw, [col], default=np.nan).reset_index(drop=True)
+    df["tov_pct"] = df["tov_pct"].fillna(df.get("to_pct", pd.Series(np.nan, index=df.index)))
+    df["ftr"] = df["ftr"].fillna(df.get("ft_rate", pd.Series(np.nan, index=df.index)))
+    df["low_sample_size"] = _bool(raw.loc[df.index] if len(df.index) else raw, ["low_sample_size"]).reset_index(drop=True)
+    df["low_sample_size"] = df["low_sample_size"] | (df["mpg"] < 10) | (df["gp"] < 5)
+    for col in ["qual_general_reason", "qual_pg_reason", "qual_wing_reason", "qual_big_reason"]:
+        df[col] = _text(raw.loc[df.index] if len(df.index) else raw, [col], default="").reset_index(drop=True)
     return df
 
 
@@ -378,7 +408,11 @@ def _build_output(df: pd.DataFrame, source_path: Path | None) -> dict:
             "conferences": [],
             "teams": [],
             "archetypes": [],
-            "league_avg": {key: 0.0 for key in ["mpg", "ppg", "rpg", "apg", "spg", "bpg", "fg", "tp", "ft", "ts"]},
+            "league_avg": {key: 0.0 for key in [
+                "mpg", "ppg", "rpg", "apg", "spg", "bpg", "tov", "fg", "two_pct", "tp",
+                "ft", "ts", "efg", "usg", "orb_pct", "drb_pct", "ast_pct", "stl_pct",
+                "blk_pct", "ftr", "tov_pct", "pf_per_40", "stops_per_40", "bpm", "porpag",
+            ]},
             "similar_to": lambda player_id, n_sim=5, metric="euclidean": [],
             "source_path": str(source_path) if source_path else "",
             "source_status": "missing" if source_path is None else "empty",
@@ -392,7 +426,15 @@ def _build_output(df: pd.DataFrame, source_path: Path | None) -> dict:
     )
     teams = sorted(df["team"].dropna().astype(str).unique().tolist())
     archetypes = sorted(df["primary_archetype"].dropna().astype(str).unique().tolist())
-    league_avg = {key: float(pd.to_numeric(df[key], errors="coerce").fillna(0).mean()) for key in ["mpg", "ppg", "rpg", "apg", "spg", "bpg", "fg", "tp", "ft", "ts"]}
+    avg_keys = [
+        "mpg", "ppg", "rpg", "apg", "spg", "bpg", "tov", "fg", "two_pct", "tp",
+        "ft", "ts", "efg", "usg", "orb_pct", "drb_pct", "ast_pct", "stl_pct",
+        "blk_pct", "ftr", "tov_pct", "pf_per_40", "stops_per_40", "bpm", "porpag",
+    ]
+    league_avg = {
+        key: float(pd.to_numeric(df.get(key, pd.Series(dtype=float)), errors="coerce").fillna(0).mean())
+        for key in avg_keys
+    }
 
     def similar_to(player_id: str, n_sim: int = 5, metric: str = "euclidean"):
         idx = df.index[df["id"] == player_id]

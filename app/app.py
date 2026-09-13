@@ -1,10 +1,12 @@
 from pathlib import Path
 import json
+import html
 
 import asttokens  # noqa: F401 - direct import lets Shinylive install this transitive dependency.
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+from scipy.spatial.distance import cdist
 from shiny import App, reactive, render, ui
 from shinywidgets import output_widget, render_widget
 
@@ -24,6 +26,17 @@ league_avg = DATA["league_avg"]
 similar_to_fn = DATA["similar_to"]
 conferences = DATA["conferences"]
 TOTAL_PLAYERS = len(df)
+HISTORICAL_PATH = (
+    HERE / "wbb_historical_player_index.csv"
+    if (HERE / "wbb_historical_player_index.csv").exists()
+    else HERE.parent / "data" / "processed" / "wbb_historical_player_index.csv"
+)
+HISTORICAL = pd.read_csv(HISTORICAL_PATH) if HISTORICAL_PATH.exists() else pd.DataFrame()
+HISTORICAL_TABLE_LIMIT = 25
+HISTORICAL_CURRENT_LIMIT = 8
+TRITON_DEFAULT_MIN_MPG = 10.0
+TRITON_DEFAULT_MIN_GP = 5
+UCSD_WBB_ROSTER_URL = "https://ucsdtritons.com/sports/womens-basketball/roster"
 
 POSITION_GROUPS = {
     "G": {"label": "Guard", "members": {"G"}, "color": POS_COLOR["G"]},
@@ -53,12 +66,190 @@ RADAR_PALETTE = [
     "#d86f74",
     "#8d7cc4",
 ]
+ARCHETYPE_SCORE_LABELS = {
+    "score_pg_combo": "PG / Combo Guard",
+    "score_wing_2_4": "2-4 Wing",
+    "score_stretch_big": "Stretch Big",
+}
+ARCHETYPE_COLOR = {
+    "PG / Combo Guard": "#4a9eed",
+    "2-4 Wing": "#5ab87a",
+    "Stretch Big": "#c8a84b",
+}
+TRITON_ZONE_METRICS = [
+    {"key": "efg", "col": "efg", "label": "eFG%", "long": "Effective FG%", "scale": 100.0, "target": 50.0, "higher_is_better": True, "weight": 20.0},
+    {"key": "three_pct", "col": "tp", "label": "3PT%", "long": "Three-point percentage", "scale": 100.0, "target": 36.0, "higher_is_better": True, "weight": 18.0},
+    {"key": "three_rate", "col": "three_share", "label": "3PA/FGA", "long": "Three-point rate", "scale": 100.0, "target": 45.0, "higher_is_better": True, "weight": 15.0},
+    {"key": "tov_pct", "col": "tov_pct", "label": "TOV%", "long": "Turnover rate", "scale": 100.0, "target": 15.0, "higher_is_better": False, "weight": 15.0},
+    {"key": "two_pct", "col": "two_pct", "label": "2PT%", "long": "Two-point percentage", "scale": 100.0, "target": 55.0, "higher_is_better": True, "weight": 12.0},
+    {"key": "drb_pct", "col": "drb_pct", "label": "DRB%", "long": "Defensive rebound rate", "scale": 100.0, "target": 15.0, "higher_is_better": True, "weight": 12.0},
+    {"key": "orb_pct", "col": "orb_pct", "label": "ORB%", "long": "Offensive rebound rate", "scale": 100.0, "target": 6.0, "higher_is_better": True, "weight": 8.0},
+]
+TRITON_SPECIAL_ARCHETYPES = {
+    "stretch_big": {
+        "label": "Stretch Big",
+        "criteria": [
+            {"key": "stretch_height", "col": "heightIn", "label": "Height", "scale": 1.0, "target": 73.0, "higher_is_better": True, "kind": "height"},
+            {"key": "stretch_three_pct", "col": "tp", "label": "3PT%", "scale": 100.0, "target": 34.0, "higher_is_better": True},
+            {"key": "stretch_three_rate", "col": "three_share", "label": "3PA/FGA", "scale": 100.0, "target": 40.0, "higher_is_better": True},
+        ],
+    },
+    "shooter": {
+        "label": "3PT Specialist",
+        "criteria": [
+            {"key": "shooter_three_rate", "col": "three_share", "label": "3PA/FGA", "scale": 100.0, "target": 65.0, "higher_is_better": True},
+            {"key": "shooter_three_pct", "col": "tp", "label": "3PT%", "scale": 100.0, "target": 35.0, "higher_is_better": True},
+        ],
+    },
+}
+TRITON_ARCHETYPE_FILTERS = {
+    "all": "All players",
+    "zone": "Triton Zone only",
+    "stretch_big": "Stretch Big",
+    "shooter": "3PT Specialist",
+}
+HISTORICAL_FEATURES = [
+    ("height_inches", "heightIn", 0.6), ("mins_per_game", "mpg", 0.4),
+    ("pts_per_game", "ppg", 0.8), ("treb_per_game", "rpg", 0.65),
+    ("ast_per_game", "apg", 0.65), ("stl_per_game", "spg", 0.35),
+    ("blk_per_game", "bpg", 0.35), ("bpm", "bpm", 0.75),
+    ("eFG", "efg", 0.55), ("3P_pct", "tp", 0.55),
+    ("AST_TOV", "ast_tov", 0.55), ("AST_pct", "ast_pct", 0.45),
+    ("DRB_pct", "drb_pct", 0.45), ("three_share", "three_share", 0.45),
+    ("rim_share", "rim_share", 0.3), ("mid_share", "mid_share", 0.25),
+]
 
 
 def dataset_status_text() -> str:
     if DATA["source_status"] == "loaded":
         return "2025-26 women's Division I player dataset loaded"
     return "No processed women's Division I dataset found yet."
+
+
+def pct_display(value):
+    num = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+    return "N/A" if pd.isna(num) else f"{num * 100:.1f}%"
+
+
+def _as_float(value, default=np.nan):
+    num = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+    return float(num) if pd.notna(num) else default
+
+
+def metric_values(frame, metric):
+    return pd.to_numeric(frame.get(metric["col"], pd.Series(np.nan, index=frame.index)), errors="coerce") * metric["scale"]
+
+
+def build_triton_frame(frame):
+    out = frame.copy()
+    weighted = pd.Series(0.0, index=out.index)
+    total_weight = sum(metric["weight"] for metric in TRITON_ZONE_METRICS)
+    checks = pd.Series(0, index=out.index)
+    zone = pd.Series(True, index=out.index)
+    for metric in TRITON_ZONE_METRICS:
+        values = metric_values(out, metric)
+        target = metric["target"]
+        ok = values >= target if metric["higher_is_better"] else values <= target
+        ok = ok.fillna(False)
+        clean = values.dropna()
+        spread = ((clean.quantile(.84) - clean.quantile(.16)) / 2.0) if not clean.empty else 1.0
+        spread = spread if np.isfinite(spread) and spread > 0 else 1.0
+        z = (values - target) / spread
+        if not metric["higher_is_better"]:
+            z = -z
+        sub = np.where(z >= 0, 70.0 + 30.0 * np.clip(z, 0, 1), 70.0 * np.clip(1 + z / 1.5, 0, 1))
+        out[f"triton_val_{metric['key']}"] = values
+        out[f"triton_ok_{metric['key']}"] = ok
+        out[f"triton_sub_{metric['key']}"] = sub
+        weighted += pd.Series(sub, index=out.index).fillna(0) * metric["weight"]
+        checks += ok.astype(int)
+        zone &= ok
+    out["triton_checks_passed"] = checks
+    out["triton_checks_total"] = len(TRITON_ZONE_METRICS)
+    out["triton_zone"] = zone
+    out["triton_war"] = (weighted / total_weight).clip(0, 100)
+    for key, meta in TRITON_SPECIAL_ARCHETYPES.items():
+        meets = pd.Series(True, index=out.index)
+        for criterion in meta["criteria"]:
+            values = metric_values(out, criterion)
+            target = criterion["target"]
+            ok = values >= target if criterion["higher_is_better"] else values <= target
+            meets &= ok.fillna(False)
+        out[f"triton_is_{key}"] = meets
+    return out
+
+
+df = build_triton_frame(df)
+
+
+def historical_slider_range(column, step=1.0, fallback=(0, 1)):
+    if HISTORICAL.empty or column not in HISTORICAL.columns:
+        return fallback
+    vals = pd.to_numeric(HISTORICAL[column], errors="coerce").dropna()
+    if vals.empty:
+        return fallback
+    return float(np.floor(vals.min() / step) * step), float(np.ceil(vals.max() / step) * step)
+
+
+def historical_current_comps(row, n=HISTORICAL_CURRENT_LIMIT):
+    if row is None or df.empty:
+        return []
+    cols = [(h, c, w) for h, c, w in HISTORICAL_FEATURES if h in HISTORICAL.columns and c in df.columns]
+    if not cols:
+        return []
+    current = df.copy()
+    if "pos" in current.columns and "pos" in row:
+        current = current[current["pos"].eq(row["pos"])]
+        if current.empty:
+            current = df.copy()
+    score = pd.Series(0.0, index=current.index)
+    weight = pd.Series(0.0, index=current.index)
+    for hist_col, current_col, w in cols:
+        hval = _as_float(row.get(hist_col))
+        cvals = pd.to_numeric(current[current_col], errors="coerce")
+        pool = pd.concat([pd.to_numeric(HISTORICAL[hist_col], errors="coerce"), pd.to_numeric(df[current_col], errors="coerce")]).dropna()
+        spread = pool.std(ddof=0)
+        if not np.isfinite(hval) or not np.isfinite(spread) or spread <= 0:
+            continue
+        dist = ((cvals - hval) / spread).abs()
+        score += dist.fillna(0) * w
+        weight += cvals.notna().astype(float) * w
+    current = current.assign(distance=(score / weight.replace(0, np.nan))).dropna(subset=["distance"])
+    current = current.sort_values(["distance", "bpm"], ascending=[True, False]).head(n)
+    comps = []
+    for i, (_, comp) in enumerate(current.iterrows(), start=1):
+        sim = 100 * np.exp(-0.75 * float(comp["distance"]))
+        comps.append({"rank": i, "similarity_score": max(0, min(100, sim)), **comp.to_dict()})
+    return comps
+
+
+def historical_row_by_id(row_id):
+    if HISTORICAL.empty or not row_id:
+        return None
+    rows = HISTORICAL[HISTORICAL["season_player_id"].astype(str).eq(str(row_id))]
+    return None if rows.empty else rows.iloc[0]
+
+
+def triton_metric_display(metric, row):
+    value = _as_float(row.get(f"triton_val_{metric['key']}"))
+    if not np.isfinite(value):
+        return "N/A"
+    return height_str(value) if metric.get("kind") == "height" else f"{value:.1f}"
+
+
+def archetype_score_rows(row):
+    rows = []
+    for col, label in ARCHETYPE_SCORE_LABELS.items():
+        score = _as_float(row.get(col), 0)
+        primary = " primary" if label == row.get("primary_archetype") else ""
+        rows.append(
+            ui.div(
+                {"class": f"arch-score-row{primary}"},
+                ui.div(ui.span(label, class_="arch-score-name"), ui.span(f"{score:.0f}", class_="arch-score-value"), class_="arch-score-head"),
+                ui.div({"class": "arch-score-track"}, ui.div({"class": "arch-score-fill", "style": f"width:{max(0, min(100, score)):.1f}%;background:{ARCHETYPE_COLOR.get(label, '#c8a84b')};"})),
+            )
+        )
+    return rows
 
 
 def position_group(value):
@@ -573,7 +764,8 @@ def make_detail_modal(player_id, frame, league_avg_map, similar_fn, watchlist, s
     if similarity_metric not in SIMILARITY_METRIC_LABELS:
         similarity_metric = "mahalanobis"
     sims = similar_fn(player_id, n_sim=5, metric=similarity_metric)
-    pc = position_color(row.get("pos", ""))
+    hist_comps = historical_current_comps(row, n=5)
+    pc = ARCHETYPE_COLOR.get(row.get("primary_archetype"), position_color(row.get("pos", "")))
     starred = player_id in watchlist
     star_icon = "\u2605" if starred else "\u2606"
     star_label = "Remove from watchlist" if starred else "Add to watchlist"
@@ -585,12 +777,32 @@ def make_detail_modal(player_id, frame, league_avg_map, similar_fn, watchlist, s
         stat_box("AST", f"{row['apg']:.1f}", league_avg_map["apg"]),
         stat_box("STL", f"{row['spg']:.2f}", league_avg_map["spg"]),
         stat_box("BLK", f"{row['bpg']:.2f}", league_avg_map["bpg"]),
+        stat_box("TOV", f"{row['tov']:.1f}", league_avg_map["tov"]),
         stat_box("FG%", f"{row['fg']*100:.1f}", league_avg_map["fg"] * 100),
         stat_box("3P%", f"{row['tp']*100:.1f}", league_avg_map["tp"] * 100),
+        stat_box("FT%", f"{row['ft']*100:.1f}", league_avg_map["ft"] * 100),
     ]
     bpm_value = pd.to_numeric(pd.Series([row.get("bpm", np.nan)]), errors="coerce").iloc[0]
+    porpag_value = pd.to_numeric(pd.Series([row.get("porpag", np.nan)]), errors="coerce").iloc[0]
     if pd.notna(bpm_value):
         statline.append(stat_box("BPM", f"{bpm_value:.1f}", 0))
+    efficiency_stats = [
+        ("eFG%", "efg", True), ("2P%", "two_pct", True), ("3P%", "tp", True),
+        ("TS%", "ts", True), ("USG%", "usg", True), ("ORB%", "orb_pct", True),
+        ("DRB%", "drb_pct", True), ("AST%", "ast_pct", True), ("TOV%", "tov_pct", True),
+        ("STL%", "stl_pct", True), ("BLK%", "blk_pct", True), ("FTR", "ftr", False),
+        ("PF/40", "pf_per_40", False), ("Stops/40", "stops_per_40", False),
+    ]
+    eff_cells = []
+    for label, col, is_pct in efficiency_stats:
+        val = _as_float(row.get(col))
+        avg = _as_float(league_avg_map.get(col), 0)
+        if not np.isfinite(val):
+            continue
+        if is_pct:
+            eff_cells.append(stat_box(label, f"{val * 100:.1f}", avg * 100))
+        else:
+            eff_cells.append(stat_box(label, f"{val:.1f}", avg))
     bars = [
         bar_row("PPG", row["ppg"], league_avg_map["ppg"], 30),
         bar_row("RPG", row["rpg"], league_avg_map["rpg"], 14),
@@ -600,6 +812,22 @@ def make_detail_modal(player_id, frame, league_avg_map, similar_fn, watchlist, s
         bar_row("3P%", row["tp"], league_avg_map["tp"], 0.55, lambda v: f"{v*100:.1f}%"),
         bar_row("TS%", row["ts"], league_avg_map["ts"], 0.75, lambda v: f"{v*100:.1f}%"),
     ]
+    shot_cards = [
+        ("Rim", row.get("rim_pct_of_total_attempts"), row.get("rim_pct"), row.get("rim_assisted_pct")),
+        ("Mid", row.get("mid_pct_of_total_attempts"), row.get("mid_pct"), row.get("mid_assisted_pct")),
+        ("3PT", row.get("three_pct_of_total_attempts"), row.get("tp"), row.get("three_assisted_pct")),
+    ]
+    triton_rows = []
+    for metric in TRITON_ZONE_METRICS:
+        ok = bool(row.get(f"triton_ok_{metric['key']}", False))
+        triton_rows.append(
+            ui.div(
+                {"class": f"triton-mini-row {'ok' if ok else ''}"},
+                ui.div(metric["label"]),
+                ui.div(f"{_as_float(row.get(f'triton_val_{metric['key']}')):.1f}"),
+                ui.div(f"{metric['target']:.0f}"),
+            )
+        )
     sim_rows = []
     for i, s in enumerate(sims):
         sim_pos = s.get("pos") or frame.loc[frame["id"] == s["id"], "pos"].iloc[0]
@@ -612,6 +840,20 @@ def make_detail_modal(player_id, frame, league_avg_map, similar_fn, watchlist, s
                 ui.div(f"{s['similarity_score']:.0f}", ui.span("similarity score", class_="sim-lbl"), class_="sim-pct"),
             )
         )
+    hist_rows = []
+    for comp in hist_comps:
+        hist_rows.append(
+            ui.div(
+                {"class": "sim-row historical", "onclick": f"Shiny.setInputValue('d1_select_similar','{comp['id']}',{{priority:'event'}})"},
+                ui.div(f"{comp['rank']:02d}", class_="sim-rank"),
+                ui.div(
+                    ui.div(comp["name"], class_="nm"),
+                    ui.div(ui.span(comp["team"]), ui.span(f"· {comp['cls']} · {comp['primary_archetype']}", style="color:var(--ink-3)"), class_="meta"),
+                    class_="sim-main",
+                ),
+                ui.div(f"{comp['similarity_score']:.0f}", ui.span("historical fit", class_="sim-lbl"), class_="sim-pct"),
+            )
+        )
 
     body = ui.div(
         {"id": "detail-body"},
@@ -619,12 +861,126 @@ def make_detail_modal(player_id, frame, league_avg_map, similar_fn, watchlist, s
             {"class": "detail-col"},
             ui.div({"class": "player-name-row"}, ui.div(row["name"], class_="player-name"), ui.tags.button({"class": "star-btn", "title": star_label, "style": star_style, "onclick": f"Shiny.setInputValue('toggle_watchlist','{player_id}',{{priority:'event'}})"}, star_icon)),
             ui.div(ui.span({"class": "team-dot", "style": f"background:{pc}"}), f"{row['team']} · {row['confName']}", class_="player-team"),
-            ui.div({"class": "bio-grid"}, bio_item("Division", "WBB D-I"), bio_item("Position", position_label(row["pos"])), bio_item("Class", row["cls"]), bio_item("Eligibility Used", str(int(row["eligibility"])), mono=True), bio_item("Height", height_str(int(row["heightIn"])), mono=True), bio_item("Games", str(int(row["gp"])), mono=True), bio_item("Min/G", f"{row['mpg']:.1f}", mono=True), bio_item("BPM", f"{bpm_value:.1f}" if pd.notna(bpm_value) else "N/A", mono=True)),
+            ui.div({"class": "bio-grid"}, bio_item("Division", "WBB D-I"), bio_item("Position", position_label(row["pos"])), bio_item("Archetype", row["primary_archetype"]), bio_item("Class", row["cls"]), bio_item("Eligibility Used", str(int(row["eligibility"])), mono=True), bio_item("Height", height_str(int(row["heightIn"])), mono=True), bio_item("Games", str(int(row["gp"])), mono=True), bio_item("Min/G", f"{row['mpg']:.1f}", mono=True), bio_item("BPM", f"{bpm_value:.1f}" if pd.notna(bpm_value) else "N/A", mono=True), bio_item("PORPAG", f"{porpag_value:.2f}" if pd.notna(porpag_value) else "N/A", mono=True)),
+            ui.div(ui.div("Archetype", class_="col-title"), *archetype_score_rows(row), class_="arch-score-panel"),
+            ui.div(ui.div("Triton Zone", ui.span(f"{row.get('triton_checks_passed', 0)}/{len(TRITON_ZONE_METRICS)} checks · {row.get('triton_war', 0):.0f} WAR", class_="sub"), class_="col-title"), ui.div({"class": "triton-mini"}, *triton_rows), class_="arch-score-panel"),
         ),
-        ui.div({"class": "detail-col"}, ui.div("Season Statline ", ui.span("2025–26", class_="sub"), class_="col-title"), ui.div({"class": "statline"}, *statline), ui.div("vs. League Average ", ui.span("unweighted mean, all WBB D-I players", class_="sub"), class_="col-title"), *bars, ui.div(ui.tags.b("Bar", style="color:var(--ink-2)"), " = player value.  ", ui.tags.b("Tick", style="color:var(--ink-2)"), " = league mean.", class_="bar-note")),
-        ui.div({"class": "detail-col"}, ui.div("Most Similar Players ", ui.span(SIMILARITY_METRIC_LABELS[similarity_metric], class_="sub"), class_="col-title"), ui.div(ui.input_radio_buttons("modal_similarity_metric", None, choices={"mahalanobis": "Mahalanobis", "euclidean": "Euclidean"}, selected=similarity_metric, inline=True), class_="sim-metric-control"), *sim_rows),
+        ui.div(
+            {"class": "detail-col"},
+            ui.div("Season Statline ", ui.span("2025–26", class_="sub"), class_="col-title"),
+            ui.div({"class": "statline"}, *statline),
+            ui.div("Efficiency", ui.span("rates and impact", class_="sub"), class_="col-title"),
+            ui.div({"class": "statline"}, *eff_cells),
+            ui.div("vs. League Average ", ui.span("unweighted mean, all WBB D-I players", class_="sub"), class_="col-title"),
+            *bars,
+            ui.div(ui.tags.b("Bar", style="color:var(--ink-2)"), " = player value.  ", ui.tags.b("Tick", style="color:var(--ink-2)"), " = league mean.", class_="bar-note"),
+            ui.div("Shot Profile", ui.span("share · FG% · assisted%", class_="sub"), class_="col-title"),
+            ui.div({"class": "shot-profile-grid"}, *[
+                ui.div({"class": "shot-profile-card"}, ui.div(label, class_="k"), ui.div(pct_display(share), class_="v"), ui.div(f"{pct_display(pct)} FG · {pct_display(ast)} assisted", class_="s"))
+                for label, share, pct, ast in shot_cards
+            ]),
+        ),
+        ui.div(
+            {"class": "detail-col"},
+            ui.div("Most Similar Current Players ", ui.span(SIMILARITY_METRIC_LABELS[similarity_metric], class_="sub"), class_="col-title"),
+            ui.div(ui.input_radio_buttons("modal_similarity_metric", None, choices={"mahalanobis": "Mahalanobis", "euclidean": "Euclidean"}, selected=similarity_metric, inline=True), class_="sim-metric-control"),
+            *sim_rows,
+            ui.div("Historical-to-Current Fits", ui.span("2021-25 profile to 2026 pool", class_="sub"), class_="col-title"),
+            *(hist_rows if hist_rows else [ui.div("No historical fit rows available.", class_="qual-note")]),
+        ),
     )
     return ui.modal(body, title=ui.HTML(f"Player Profile <b>· {row['name']}</b> <span class='div-badge'>WBB D-I</span>"), easy_close=True, size="xl", footer=None)
+
+
+def make_historical_tab():
+    height_min, height_max = historical_slider_range("height_inches", 1, (58, 78))
+    mpg_min, mpg_max = historical_slider_range("mins_per_game", .5, (0, 38))
+    years = sorted(pd.to_numeric(HISTORICAL.get("year", pd.Series(dtype=float)), errors="coerce").dropna().astype(int).unique().tolist())
+    confs = sorted(HISTORICAL.get("conf", pd.Series(dtype=object)).dropna().astype(str).unique().tolist())
+    teams = sorted(HISTORICAL.get("team", pd.Series(dtype=object)).dropna().astype(str).unique().tolist())
+    arches = sorted(HISTORICAL.get("archetype", pd.Series(dtype=object)).dropna().astype(str).unique().tolist())
+    return ui.div(
+        {"id": "hist-tab", "class": "tab-panel"},
+        ui.div(
+            {"class": "beta-shell"},
+            ui.div(
+                {"class": "beta-header"},
+                ui.div("Historical Players", class_="beta-title"),
+                ui.div("2021-2025 WBB player-seasons. Click a row to rank the current 2026 pool against that historical profile.", class_="beta-note"),
+                ui.div(
+                    {"class": "beta-filter-grid"},
+                    ui.input_text("hist_q", None, placeholder="Search historical player..."),
+                    ui.input_selectize("hist_season", None, choices={str(y): str(y) for y in years}, selected=[], multiple=True, options={"placeholder": "Any season", "plugins": ["remove_button"]}),
+                    ui.input_selectize("hist_conf", None, choices={c: c for c in confs}, selected=[], multiple=True, options={"placeholder": "Any conference", "plugins": ["remove_button"]}),
+                    ui.input_selectize("hist_team", None, choices={t: t for t in teams}, selected=[], multiple=True, options={"placeholder": "Any team", "plugins": ["remove_button"]}),
+                    ui.input_selectize("hist_pos", None, choices={p: p for p in POSITION_GROUP_ORDER + ["G/F", "F/C"]}, selected=[], multiple=True, options={"placeholder": "Any position", "plugins": ["remove_button"]}),
+                    ui.input_selectize("hist_arch", None, choices={a: a for a in arches}, selected=[], multiple=True, options={"placeholder": "Any archetype", "plugins": ["remove_button"]}),
+                    ui.input_slider("hist_height", None, min=int(height_min), max=int(height_max), value=[int(height_min), int(height_max)], step=1),
+                    ui.input_slider("hist_mpg", None, min=float(mpg_min), max=float(mpg_max), value=max(5.0, float(mpg_min)), step=.5),
+                ),
+            ),
+            ui.div({"class": "beta-results-head"}, ui.output_text("hist_results_count")),
+            ui.output_ui("historical_table_ui"),
+            ui.output_ui("historical_current_comps_ui"),
+        ),
+    )
+
+
+def make_triton_tab():
+    return ui.div(
+        {"id": "triton-tab", "class": "tab-panel"},
+        ui.div(
+            {"class": "beta-shell"},
+            ui.div(
+                {"class": "beta-header"},
+                ui.div("Triton Zone", class_="beta-title"),
+                ui.div("Same staff targets as the men's dashboard, applied to 2026 women's D-I players.", class_="beta-note"),
+                ui.div(
+                    {"class": "beta-filter-grid"},
+                    ui.input_text("triton_q", None, placeholder="Search player..."),
+                    ui.input_selectize("triton_conf", None, choices={r["confName"]: r["confName"] for r in conferences}, selected=[], multiple=True, options={"placeholder": "Any conference", "plugins": ["remove_button"]}),
+                    ui.input_selectize("triton_team", None, choices={t: t for t in sorted(df["team"].dropna().unique())}, selected=[], multiple=True, options={"placeholder": "Any team", "plugins": ["remove_button"]}),
+                    ui.input_selectize("triton_pos", None, choices={p: p for p in sorted(df["pos"].dropna().unique())}, selected=[], multiple=True, options={"placeholder": "Any position", "plugins": ["remove_button"]}),
+                    ui.input_radio_buttons("triton_arch", None, choices=TRITON_ARCHETYPE_FILTERS, selected="all", inline=True),
+                    ui.input_slider("triton_min_mpg", None, min=0, max=35, value=TRITON_DEFAULT_MIN_MPG, step=.5),
+                    ui.input_slider("triton_min_gp", None, min=0, max=35, value=TRITON_DEFAULT_MIN_GP, step=1),
+                    ui.input_slider("triton_min_checks", None, min=0, max=len(TRITON_ZONE_METRICS), value=0, step=1),
+                ),
+                ui.div({"class": "triton-targets"}, *[
+                    ui.div(ui.span(metric["label"]), ui.span(f"{metric['target']:.0f}{'%' if metric['col'] != 'heightIn' else ''}"), class_="triton-target")
+                    for metric in TRITON_ZONE_METRICS
+                ]),
+            ),
+            ui.div({"class": "beta-results-head"}, ui.output_text("triton_results_count")),
+            ui.output_ui("triton_table_ui"),
+        ),
+    )
+
+
+def make_tracker_tab():
+    return ui.div(
+        {"id": "tracker-tab", "class": "tab-panel"},
+        ui.div(
+            {"class": "beta-shell"},
+            ui.div({"class": "beta-header"}, ui.div("Triton Tracker", class_="beta-title"), ui.div("Save historical ideals, then compare the current 2026 WBB pool against those profiles.", class_="beta-note")),
+            ui.output_ui("tracker_ui"),
+        ),
+    )
+
+
+def make_lineup_tab():
+    return ui.div(
+        {"id": "lineup-tab", "class": "tab-panel"},
+        ui.div(
+            {"class": "beta-shell"},
+            ui.div(
+                {"class": "beta-header"},
+                ui.div("UCSD 2026-27 Lineup Beta", class_="beta-title"),
+                ui.div(ui.HTML(f"Watchlist-driven lineup sketch. Use the <a href='{UCSD_WBB_ROSTER_URL}' target='_blank'>official UC San Diego women's roster</a> as the roster reference."), class_="beta-note"),
+            ),
+            ui.output_ui("lineup_ui"),
+        ),
+    )
 
 
 app_ui = ui.page_fluid(
@@ -659,7 +1015,7 @@ app_ui = ui.page_fluid(
 
             function switchTab(tab) {
                 document.querySelectorAll('.tab-panel').forEach(function(p) { p.classList.remove('active'); });
-                document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active-d1','active-wl'); });
+                document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active-d1','active-wl','active-hist','active-triton','active-tracker','active-lineup'); });
                 document.getElementById(tab+'-tab').classList.add('active');
                 document.getElementById('btn-'+tab).classList.add('active-'+tab);
                 if (window.Shiny && window.Shiny.setInputValue) {
@@ -702,12 +1058,20 @@ app_ui = ui.page_fluid(
         ui.div(
             {"id": "tab-switcher"},
             ui.tags.button("Division I", id="btn-d1", class_="tab-btn active-d1", onclick="switchTab('d1')"),
+            ui.tags.button("Triton Tracker", id="btn-tracker", class_="tab-btn", onclick="switchTab('tracker')"),
+            ui.tags.button("Triton Zone", id="btn-triton", class_="tab-btn", onclick="switchTab('triton')"),
+            ui.tags.button("Historical Players", id="btn-hist", class_="tab-btn", onclick="switchTab('hist')"),
+            ui.tags.button("Lineup Beta", id="btn-lineup", class_="tab-btn", onclick="switchTab('lineup')"),
             ui.div({"class": "tab-sep"}),
             ui.tags.button(ui.HTML('Watchlist <span id="wl-badge" class="wl-badge" style="display:none">0</span>'), id="btn-wl", class_="tab-btn", onclick="switchTab('wl')"),
         ),
         ui.div(
             {"id": "tab-content"},
             ui.div({"id": "d1-tab", "class": "tab-panel active"}, ui.div({"class": "body-grid"}, make_sidebar("d1", df, conferences), make_plot_area("d1"))),
+            make_tracker_tab(),
+            make_triton_tab(),
+            make_historical_tab(),
+            make_lineup_tab(),
             ui.div(
                 {"id": "wl-tab", "class": "tab-panel"},
                 ui.div(
@@ -738,6 +1102,8 @@ def server(input, output, session):
     modal_req = reactive.Value(None)
     modal_player = reactive.Value(None)
     modal_similarity_metric = reactive.Value("mahalanobis")
+    historical_selected = reactive.Value(None)
+    tracker_ids = reactive.Value(set())
 
     def sync_scatter(fig, plot_df, selected_id, dimmed_arch):
         traces = build_traces(plot_df, selected_id, dimmed_arch)
@@ -808,6 +1174,31 @@ def server(input, output, session):
     @reactive.event(input.wl_open_player)
     def _wl_open_player():
         pid = input.wl_open_player()
+        if pid:
+            import random
+            modal_req.set((pid, random.random()))
+
+    @reactive.effect
+    @reactive.event(input.hist_select_row)
+    def _hist_select_row():
+        row_id = input.hist_select_row()
+        if row_id:
+            historical_selected.set(str(row_id))
+
+    @reactive.effect
+    @reactive.event(input.tracker_toggle)
+    def _tracker_toggle():
+        row_id = input.tracker_toggle()
+        if not row_id:
+            return
+        curr = set(tracker_ids.get())
+        curr.discard(str(row_id)) if str(row_id) in curr else curr.add(str(row_id))
+        tracker_ids.set(curr)
+
+    @reactive.effect
+    @reactive.event(input.triton_open_player)
+    def _triton_open_player():
+        pid = input.triton_open_player()
         if pid:
             import random
             modal_req.set((pid, random.random()))
@@ -921,6 +1312,59 @@ def server(input, output, session):
         return d
 
     @reactive.calc
+    def historical_filtered():
+        if HISTORICAL.empty:
+            return HISTORICAL.copy()
+        d = HISTORICAL.copy()
+        q = (input.hist_q() or "").strip().lower()
+        if q:
+            d = d[d["player_name"].str.lower().str.contains(q, na=False)]
+        years = [int(y) for y in list(input.hist_season() or [])]
+        if years:
+            d = d[pd.to_numeric(d["year"], errors="coerce").isin(years)]
+        confs = list(input.hist_conf() or [])
+        if confs:
+            d = d[d["conf"].isin(confs)]
+        teams = list(input.hist_team() or [])
+        if teams:
+            d = d[d["team"].isin(teams)]
+        poss = list(input.hist_pos() or [])
+        if poss:
+            d = d[d["pos"].isin(poss)]
+        arches = list(input.hist_arch() or [])
+        if arches:
+            d = d[d["archetype"].isin(arches)]
+        lo, hi = input.hist_height()
+        d = d[(pd.to_numeric(d["height_inches"], errors="coerce") >= lo) & (pd.to_numeric(d["height_inches"], errors="coerce") <= hi)]
+        d = d[pd.to_numeric(d["mins_per_game"], errors="coerce").fillna(0) >= float(input.hist_mpg())]
+        return d.sort_values(["year", "bpm", "mins_per_game"], ascending=[False, False, False]).head(HISTORICAL_TABLE_LIMIT)
+
+    @reactive.calc
+    def triton_filtered():
+        d = df.copy()
+        q = (input.triton_q() or "").strip().lower()
+        if q:
+            d = d[d["name"].str.lower().str.contains(q, na=False)]
+        confs = list(input.triton_conf() or [])
+        if confs:
+            d = d[d["confName"].isin(confs)]
+        teams = list(input.triton_team() or [])
+        if teams:
+            d = d[d["team"].isin(teams)]
+        poss = list(input.triton_pos() or [])
+        if poss:
+            d = d[d["pos"].isin(poss)]
+        d = d[pd.to_numeric(d["mpg"], errors="coerce").fillna(0) >= float(input.triton_min_mpg())]
+        d = d[pd.to_numeric(d["gp"], errors="coerce").fillna(0) >= float(input.triton_min_gp())]
+        d = d[pd.to_numeric(d["triton_checks_passed"], errors="coerce").fillna(0) >= float(input.triton_min_checks())]
+        arch = input.triton_arch() or "all"
+        if arch == "zone":
+            d = d[d["triton_zone"]]
+        elif arch in {"stretch_big", "shooter"}:
+            d = d[d[f"triton_is_{arch}"]]
+        return d.sort_values(["triton_war", "bpm"], ascending=[False, False]).head(100)
+
+    @reactive.calc
     def d1_plot_df():
         ids = set(d1_filtered()["id"])
         sid = d1_sel.get()
@@ -958,6 +1402,121 @@ def server(input, output, session):
     @render.ui
     def d1_modal_trigger():
         return ui.div()
+
+    @output
+    @render.text
+    def hist_results_count():
+        if HISTORICAL.empty:
+            return "No historical data loaded"
+        return f"{len(historical_filtered())} shown / {len(HISTORICAL)} historical player-seasons"
+
+    @output
+    @render.ui
+    def historical_table_ui():
+        rows = historical_filtered()
+        if rows.empty:
+            return ui.div("No historical players match those filters.", class_="beta-empty")
+        body = []
+        saved = tracker_ids.get()
+        for _, row in rows.iterrows():
+            row_id = str(row["season_player_id"])
+            body.append(
+                ui.tags.tr(
+                    {"class": "is-selected" if row_id == historical_selected.get() else "", "onclick": f"Shiny.setInputValue('hist_select_row','{row_id}',{{priority:'event'}})"},
+                    ui.tags.td(ui.div(str(row["player_name"]), class_="table-player"), ui.div(f"{row['team']} · {int(row['year'])}", class_="table-meta")),
+                    ui.tags.td(str(row.get("conf", ""))),
+                    ui.tags.td(str(row.get("pos", ""))),
+                    ui.tags.td(str(row.get("archetype", ""))),
+                    ui.tags.td(f"{_as_float(row.get('mins_per_game'), 0):.1f}"),
+                    ui.tags.td(f"{_as_float(row.get('pts_per_game'), 0):.1f}"),
+                    ui.tags.td(f"{_as_float(row.get('ast_per_game'), 0):.1f}"),
+                    ui.tags.td(f"{_as_float(row.get('treb_per_game'), 0):.1f}"),
+                    ui.tags.td(f"{_as_float(row.get('bpm'), 0):.1f}"),
+                    ui.tags.td(ui.tags.button("Saved" if row_id in saved else "Save", class_="mini-btn", onclick=f"event.stopPropagation();Shiny.setInputValue('tracker_toggle','{row_id}',{{priority:'event'}})")),
+                )
+            )
+        return ui.div({"class": "beta-table-wrap"}, ui.tags.table({"class": "beta-table"}, ui.tags.thead(ui.tags.tr(*[ui.tags.th(x) for x in ["Player", "Conf", "Pos", "Archetype", "MPG", "PPG", "APG", "RPG", "BPM", "Tracker"]])), ui.tags.tbody(*body)))
+
+    @output
+    @render.ui
+    def historical_current_comps_ui():
+        row = historical_row_by_id(historical_selected.get())
+        if row is None:
+            return ui.div("Select a historical player to load current 2026 comps.", class_="beta-empty")
+        comps = historical_current_comps(row)
+        cards = [
+            ui.div(
+                {"class": "comp-card", "onclick": f"Shiny.setInputValue('d1_select_similar','{comp['id']}',{{priority:'event'}})"},
+                ui.div(f"{comp['rank']:02d}", class_="comp-rank"),
+                ui.div(ui.div(comp["name"], class_="comp-name"), ui.div(f"{comp['team']} · {comp['cls']} · {comp['primary_archetype']}", class_="table-meta")),
+                ui.div(f"{comp['similarity_score']:.0f}", class_="comp-score"),
+            )
+            for comp in comps
+        ]
+        return ui.div({"class": "comp-panel"}, ui.div(f"Current 2026 players most like {row['player_name']} ({int(row['year'])})", class_="panel-title"), ui.div({"class": "comp-grid"}, *cards))
+
+    @output
+    @render.text
+    def triton_results_count():
+        return f"{len(triton_filtered())} players on the board"
+
+    @output
+    @render.ui
+    def triton_table_ui():
+        rows = triton_filtered()
+        if rows.empty:
+            return ui.div("No players match those Triton Zone filters.", class_="beta-empty")
+        body = []
+        for rank, (_, row) in enumerate(rows.iterrows(), start=1):
+            cells = [ui.tags.td(f"{_as_float(row.get(f'triton_val_{m['key']}'), 0):.1f}", class_="ok-cell" if row.get(f"triton_ok_{m['key']}", False) else "") for m in TRITON_ZONE_METRICS]
+            body.append(
+                ui.tags.tr(
+                    {"onclick": f"Shiny.setInputValue('triton_open_player','{row['id']}',{{priority:'event'}})"},
+                    ui.tags.td(str(rank)),
+                    ui.tags.td(ui.div(row["name"], class_="table-player"), ui.div(f"{row['team']} · {row['cls']} · {row['primary_archetype']}", class_="table-meta")),
+                    ui.tags.td(f"{row['triton_war']:.0f}"),
+                    ui.tags.td(f"{int(row['triton_checks_passed'])}/{len(TRITON_ZONE_METRICS)}"),
+                    *cells,
+                )
+            )
+        return ui.div({"class": "beta-table-wrap"}, ui.tags.table({"class": "beta-table"}, ui.tags.thead(ui.tags.tr(*[ui.tags.th(x) for x in ["#", "Player", "WAR", "Checks", *[m["label"] for m in TRITON_ZONE_METRICS]]])), ui.tags.tbody(*body)))
+
+    @output
+    @render.ui
+    def tracker_ui():
+        ids = sorted(tracker_ids.get())
+        if not ids:
+            return ui.div("Save players from Historical Players to build a Triton Tracker board.", class_="beta-empty")
+        panels = []
+        for row_id in ids:
+            row = historical_row_by_id(row_id)
+            if row is None:
+                continue
+            comps = historical_current_comps(row, n=5)
+            cards = [
+                ui.div({"class": "tracker-row", "onclick": f"Shiny.setInputValue('d1_select_similar','{comp['id']}',{{priority:'event'}})"}, ui.span(f"{comp['rank']:02d}"), ui.span(comp["name"]), ui.span(comp["team"]), ui.tags.b(f"{comp['similarity_score']:.0f}"))
+                for comp in comps
+            ]
+            panels.append(ui.div({"class": "tracker-card"}, ui.div(ui.div(row["player_name"], class_="panel-title"), ui.div(f"{row['team']} · {int(row['year'])} · {row['archetype']}", class_="table-meta")), *cards))
+        return ui.div({"class": "tracker-grid"}, *panels)
+
+    @output
+    @render.ui
+    def lineup_ui():
+        rows = [r for _, r in watchlist_rows(watchlist.get())]
+        if not rows:
+            return ui.div("Add current players to the watchlist to sketch lineup combinations against the UCSD roster reference.", class_="beta-empty")
+        pool = pd.DataFrame(rows)
+        pool = pool.assign(lineup_score=pool["triton_war"].fillna(0) + pool["bpm"].fillna(0) * 2 + pool["primary_score"].fillna(0) * .25)
+        guards = pool[pool["pos"].isin(["G", "G/F"])].sort_values("lineup_score", ascending=False).head(2)
+        wings = pool[pool["pos"].isin(["G/F", "F"])].drop(guards.index, errors="ignore").sort_values("lineup_score", ascending=False).head(2)
+        bigs = pool[pool["pos"].isin(["F/C", "C"])].drop(guards.index.union(wings.index), errors="ignore").sort_values("lineup_score", ascending=False).head(1)
+        chosen = pd.concat([guards, wings, bigs]).drop_duplicates(subset=["id"]).head(5)
+        cards = [
+            ui.div({"class": "lineup-card"}, ui.div(row["name"], class_="comp-name"), ui.div(f"{row['team']} · {row['pos']} · {row['primary_archetype']}", class_="table-meta"), ui.div(f"Triton WAR {row['triton_war']:.0f} · BPM {row['bpm']:.1f}", class_="table-meta"))
+            for _, row in chosen.iterrows()
+        ]
+        return ui.div(ui.div({"class": "lineup-grid"}, *cards), ui.div(f"Roster reference: {UCSD_WBB_ROSTER_URL}", class_="beta-note"))
 
     @output
     @render.text

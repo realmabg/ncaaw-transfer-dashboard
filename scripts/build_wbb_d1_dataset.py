@@ -177,9 +177,11 @@ def add_pca_columns(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
 def build_dataset(raw: pd.DataFrame) -> pd.DataFrame:
     out = pd.DataFrame(index=raw.index)
 
+    out["season"] = numeric(raw["season"]).fillna(numeric(raw.get("year", pd.Series(index=raw.index)))).astype("Int64")
     out["id"] = clean_text(raw["player_id"], default="")
     fallback_ids = pd.Series([f"wbbp{i}" for i in range(len(out))], index=out.index)
     out["id"] = out["id"].where(out["id"].str.len() > 0, fallback_ids)
+    out["season_player_id"] = out["season"].astype(str).str.replace("<NA>", "", regex=False) + "_" + out["id"].astype(str)
     out["name"] = clean_text(raw["name"], default="")
     out["team"] = clean_text(raw["team"], default="")
     out["conf"] = clean_text(raw["conf"], default="")
@@ -215,6 +217,9 @@ def build_dataset(raw: pd.DataFrame) -> pd.DataFrame:
     out["ts"] = normalize_pct(raw["TS_%"])
     out["efg"] = normalize_pct(raw["eFG_%"])
     out["usg"] = normalize_pct(raw["usg_%"])
+    out["two_pct"] = normalize_pct(raw["twoP_%"])
+    out["ftr"] = numeric(raw["FT_rate"])
+    out["pf_per_40"] = numeric(raw["pf_per_40"])
 
     three_attempted = numeric(raw["three_attempted"]).fillna(np.nan)
     total_attempted = numeric(raw["total_attempted"]).fillna(np.nan)
@@ -249,6 +254,7 @@ def build_dataset(raw: pd.DataFrame) -> pd.DataFrame:
     out["drb_pct"] = normalize_pct(raw["DRB_%"])
     out["ast_pct"] = normalize_pct(raw["AST_%"])
     out["to_pct"] = normalize_pct(raw["TO_%"])
+    out["tov_pct"] = out["to_pct"]
     out["blk_pct"] = normalize_pct(raw["blk_%"])
     out["stl_pct"] = normalize_pct(raw["stl_%"])
     out["ft_rate"] = numeric(raw["FT_rate"])
@@ -282,6 +288,27 @@ def build_dataset(raw: pd.DataFrame) -> pd.DataFrame:
     for column in shot_profile_columns:
         target = column.lower().replace("%", "pct").replace(".", "_")
         out[target] = numeric(raw[column])
+    out["dunk_attempted"] = numeric(raw["dunkatt"])
+    out["rim_assisted_pct"] = out["pct_rim_made_assisted"]
+    out["mid_assisted_pct"] = out["pct_mid_made_assisted"]
+    out["three_assisted_pct"] = out["pct_three_made_assisted"]
+    out["assisted_fg_pct"] = numeric(raw["pct_total_made_assisted"])
+    out["rim_share"] = out["rim_pct_of_total_attempts"]
+    out["mid_share"] = out["mid_pct_of_total_attempts"]
+    out["pbp_rim_made"] = numeric(raw["rim_made"])
+    out["pbp_rim_missed"] = numeric(raw["rim_missed"])
+    out["pbp_rim_assisted"] = numeric(raw["rim_assisted"])
+    out["pbp_mid_made"] = numeric(raw["mid_made"])
+    out["pbp_mid_missed"] = numeric(raw["mid_missed"])
+    out["pbp_mid_assisted"] = numeric(raw["mid_assisted"])
+    out["pbp_three_made"] = numeric(raw["three_made"])
+    out["pbp_three_missed"] = numeric(raw["three_missed"])
+    out["pbp_three_assisted"] = numeric(raw["three_assisted"])
+    out["rim_made_total"] = out["pbp_rim_made"] + numeric(raw["dunk_made"])
+    out["rim_attempts_total"] = out["rim_attempted"] + out["dunk_attempted"]
+    out["mid_attempts_total"] = out["mid_attempted"]
+    out["three_attempts_total"] = out["three_attempted"]
+    out["low_sample_size"] = (out["mpg"] < 10) | (out["gp"] < 5)
 
     out["pct_assist_creation"] = percentile(out["assist_creation"].fillna(0))
     out["pct_three_pct"] = percentile(out["tp"].fillna(0))
@@ -353,6 +380,26 @@ def build_dataset(raw: pd.DataFrame) -> pd.DataFrame:
     out["primary_score_col"] = out[score_cols].idxmax(axis=1)
     out["primary_score"] = out[score_cols].max(axis=1)
     out["primary_archetype"] = out["primary_score_col"].map(ARCHETYPE_LABELS).fillna("Unassigned")
+    out["qual_general_reason"] = np.where(
+        out["meets_efg_500"] & out["meets_positive_ast_tov"],
+        "Clears baseline eFG and AST/TOV checks.",
+        "Does not clear every baseline efficiency/decision-making check.",
+    )
+    out["qual_pg_reason"] = np.where(
+        out["meets_pg_preferred"],
+        "Clears PG/combo shooting, volume, assist, and AST/TOV gates.",
+        "Below one or more PG/combo preferred gates.",
+    )
+    out["qual_wing_reason"] = np.where(
+        out["meets_wing_preferred"],
+        "Clears wing rebounding, shooting, volume, and AST/TOV gates.",
+        "Below one or more 2-4 wing preferred gates.",
+    )
+    out["qual_big_reason"] = np.where(
+        out["meets_big_preferred"],
+        "Clears stretch big size, rebounding, shooting, volume, and AST/TOV gates.",
+        "Below one or more stretch big preferred gates.",
+    )
 
     out["transfer_available"] = False
     out["transfer_status"] = ""
