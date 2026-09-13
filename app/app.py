@@ -36,6 +36,7 @@ HISTORICAL_TABLE_LIMIT = 25
 HISTORICAL_CURRENT_LIMIT = 8
 TRITON_DEFAULT_MIN_MPG = 10.0
 TRITON_DEFAULT_MIN_GP = 5
+TRITON_TABLE_LIMITS = {"25": "Top 25", "50": "Top 50", "100": "Top 100", "all": "All"}
 UCSD_WBB_ROSTER_URL = "https://ucsdtritons.com/sports/womens-basketball/roster"
 
 POSITION_GROUPS = {
@@ -88,6 +89,7 @@ TRITON_ZONE_METRICS = [
 TRITON_SPECIAL_ARCHETYPES = {
     "stretch_big": {
         "label": "Stretch Big",
+        "note": "Height + shooting range.",
         "criteria": [
             {"key": "stretch_height", "col": "heightIn", "label": "Height", "scale": 1.0, "target": 73.0, "higher_is_better": True, "kind": "height"},
             {"key": "stretch_three_pct", "col": "tp", "label": "3PT%", "scale": 100.0, "target": 34.0, "higher_is_better": True},
@@ -96,6 +98,7 @@ TRITON_SPECIAL_ARCHETYPES = {
     },
     "shooter": {
         "label": "3PT Specialist",
+        "note": "High three-point volume with make-rate floor.",
         "criteria": [
             {"key": "shooter_three_rate", "col": "three_share", "label": "3PA/FGA", "scale": 100.0, "target": 65.0, "higher_is_better": True},
             {"key": "shooter_three_pct", "col": "tp", "label": "3PT%", "scale": 100.0, "target": 35.0, "higher_is_better": True},
@@ -934,20 +937,30 @@ def make_triton_tab():
             ui.div(
                 {"class": "triton-header-card"},
                 ui.div("Triton Zone", class_="triton-title"),
-                ui.div("Same staff targets as the men's dashboard, applied to 2026 women's D-I players. Players are ranked by weighted fit, with green cells clearing the target.", class_="triton-lede"),
+                ui.div(
+                    "Every D-I player scored against the staff's Triton Zone targets and ranked by the weighted fit. Hitting a target is worth 70 on that metric, clearing it comfortably earns up to 100, so the board separates players who merely qualify from players who live in the zone.",
+                    class_="triton-lede",
+                ),
                 ui.div(
                     {"class": "triton-filter-row"},
                     ui.div({"class": "triton-filter-field"}, ui.div("Search player", class_="triton-filter-title"), ui.input_text("triton_q", None, placeholder="Search a player...")),
                     ui.div({"class": "triton-filter-field"}, ui.div("Conference", class_="triton-filter-title"), ui.input_selectize("triton_conf", None, choices={r["confName"]: r["confName"] for r in conferences}, selected=[], multiple=True, options={"placeholder": "Any conference", "plugins": ["remove_button"]})),
                     ui.div({"class": "triton-filter-field"}, ui.div("Team", class_="triton-filter-title"), ui.input_selectize("triton_team", None, choices={t: t for t in sorted(df["team"].dropna().unique())}, selected=[], multiple=True, options={"placeholder": "Any team", "plugins": ["remove_button"]})),
                     ui.div({"class": "triton-filter-field"}, ui.div("Pos", class_="triton-filter-title"), ui.input_selectize("triton_pos", None, choices={p: p for p in sorted(df["pos"].dropna().unique())}, selected=[], multiple=True, options={"placeholder": "Any position", "plugins": ["remove_button"]})),
+                    ui.div({"class": "triton-filter-field"}, ui.div("Class", class_="triton-filter-title"), ui.input_selectize("triton_cls", None, choices={c: c for c in CLASSES}, selected=[], multiple=True, options={"placeholder": "Any class", "plugins": ["remove_button"]})),
                 ),
                 ui.div(
                     {"class": "triton-filter-row triton-filter-row--second"},
-                    ui.div({"class": "triton-filter-field triton-filter-field--wide"}, ui.div("Archetype filter", class_="triton-filter-title"), ui.input_radio_buttons("triton_arch", None, choices=TRITON_ARCHETYPE_FILTERS, selected="all", inline=True)),
+                    ui.div(
+                        {"class": "triton-filter-field triton-filter-field--wide"},
+                        ui.div("Archetype filter", class_="triton-filter-title"),
+                        ui.input_radio_buttons("triton_arch", None, choices=TRITON_ARCHETYPE_FILTERS, selected="all", inline=True),
+                        ui.input_checkbox("triton_require_zone", "Archetype must also clear the full Triton Zone", value=False),
+                    ),
                     ui.div({"class": "triton-filter-field triton-filter-field--slider"}, ui.div("Minutes per game minimum", class_="triton-filter-title"), ui.input_slider("triton_min_mpg", None, min=0, max=35, value=TRITON_DEFAULT_MIN_MPG, step=.5)),
                     ui.div({"class": "triton-filter-field triton-filter-field--slider"}, ui.div("Games played minimum", class_="triton-filter-title"), ui.input_slider("triton_min_gp", None, min=0, max=35, value=TRITON_DEFAULT_MIN_GP, step=1)),
                     ui.div({"class": "triton-filter-field triton-filter-field--slider"}, ui.div("Zone checks cleared minimum", class_="triton-filter-title"), ui.input_slider("triton_min_checks", None, min=0, max=len(TRITON_ZONE_METRICS), value=0, step=1)),
+                    ui.div({"class": "triton-filter-field"}, ui.div("Board length", class_="triton-filter-title"), ui.input_select("triton_limit", None, choices=TRITON_TABLE_LIMITS, selected="100")),
                 ),
                 ui.tags.details(
                     {"class": "triton-more"},
@@ -960,6 +973,22 @@ def make_triton_tab():
                                 {"class": "triton-threshold-field"},
                                 ui.div(ui.span(metric["label"], class_="triton-threshold-name"), ui.span(metric["long"], class_="triton-threshold-hint"), class_="triton-threshold-head"),
                                 ui.div(f"{metric['target']:.0f}{'%' if metric['col'] != 'heightIn' else ''}", class_="triton-threshold-static"),
+                            )
+                            for metric in TRITON_ZONE_METRICS
+                        ],
+                    ),
+                ),
+                ui.tags.details(
+                    {"class": "triton-more"},
+                    ui.tags.summary("Triton Zone weights"),
+                    ui.div("How much each metric counts toward the score. These match the current staff-weighted setup used for the women's board.", class_="triton-more-note"),
+                    ui.div(
+                        {"class": "triton-threshold-grid triton-threshold-grid--weights"},
+                        *[
+                            ui.div(
+                                {"class": "triton-weight-field"},
+                                ui.div(ui.span(metric["label"], class_="triton-threshold-name"), ui.span(f"{metric['weight'] / sum(m['weight'] for m in TRITON_ZONE_METRICS):.0%}", class_="triton-threshold-hint"), class_="triton-threshold-head"),
+                                ui.div(f"{metric['weight']:.0f}", class_="triton-threshold-static"),
                             )
                             for metric in TRITON_ZONE_METRICS
                         ],
@@ -1369,6 +1398,9 @@ def server(input, output, session):
         poss = list(input.triton_pos() or [])
         if poss:
             d = d[d["pos"].isin(poss)]
+        classes = list(input.triton_cls() or [])
+        if classes:
+            d = d[d["cls"].isin(classes)]
         d = d[pd.to_numeric(d["mpg"], errors="coerce").fillna(0) >= float(input.triton_min_mpg())]
         d = d[pd.to_numeric(d["gp"], errors="coerce").fillna(0) >= float(input.triton_min_gp())]
         d = d[pd.to_numeric(d["triton_checks_passed"], errors="coerce").fillna(0) >= float(input.triton_min_checks())]
@@ -1377,7 +1409,9 @@ def server(input, output, session):
             d = d[d["triton_zone"]]
         elif arch in {"stretch_big", "shooter"}:
             d = d[d[f"triton_is_{arch}"]]
-        return d.sort_values(["triton_war", "bpm"], ascending=[False, False]).head(100)
+            if bool(input.triton_require_zone()):
+                d = d[d["triton_zone"]]
+        return d.sort_values(["triton_war", "bpm"], ascending=[False, False])
 
     @reactive.calc
     def d1_plot_df():
@@ -1473,12 +1507,19 @@ def server(input, output, session):
     @output
     @render.text
     def triton_results_count():
-        return f"{len(triton_filtered())} players on the board"
+        total = len(triton_filtered())
+        limit = input.triton_limit() or "100"
+        shown = total if limit == "all" else min(total, int(limit))
+        noun = "matching players" if total != shown else "players on the board"
+        return f"{shown} of {total} {noun}" if total != shown else f"{shown} players on the board"
 
     @output
     @render.ui
     def triton_table_ui():
         rows = triton_filtered()
+        limit = input.triton_limit() or "100"
+        if limit != "all":
+            rows = rows.head(int(limit))
         if rows.empty:
             return ui.div("No players match those Triton Zone filters.", class_="triton-empty")
         body = []
@@ -1494,17 +1535,26 @@ def server(input, output, session):
             ]
             war = max(0, min(100, _as_float(row.get("triton_war"), 0)))
             checks_passed = int(row["triton_checks_passed"])
+            arch_tags = []
+            for arch_key, arch_meta in TRITON_SPECIAL_ARCHETYPES.items():
+                if bool(row.get(f"triton_is_{arch_key}", False)):
+                    arch_tags.append(ui.span(arch_meta["label"], class_="triton-arch-tag"))
             body.append(
                 ui.tags.tr(
                     {"onclick": f"Shiny.setInputValue('triton_open_player','{row['id']}',{{priority:'event'}})"},
                     ui.tags.td(str(rank)),
-                    ui.tags.td(ui.div(row["name"], class_="table-player"), ui.div(f"{row['team']} · {row['cls']} · {row['primary_archetype']}", class_="table-meta")),
+                    ui.tags.td(ui.div(row["name"], class_="table-player"), ui.div(f"{row['team']} · {row['cls']} · {row['pos']}", class_="table-meta")),
+                    ui.tags.td(row.get("confName", "")),
+                    ui.tags.td(height_str(_as_float(row.get("heightIn"), 0))),
+                    ui.tags.td(f"{_as_float(row.get('mpg'), 0):.1f}"),
                     ui.tags.td(ui.div(f"{war:.0f}", class_="triton-war-value"), ui.div({"class": "triton-war-track"}, ui.div({"class": "triton-war-fill", "style": f"width:{war:.1f}%"}))),
                     ui.tags.td(ui.span(f"{checks_passed}/{len(TRITON_ZONE_METRICS)}", class_=f"triton-zone-badge {'is-full' if checks_passed >= len(TRITON_ZONE_METRICS) else ''}")),
                     *cells,
+                    ui.tags.td(ui.div({"class": "triton-arch-tags"}, *(arch_tags or [ui.span("-", class_="triton-arch-tag is-empty")]))),
                 )
             )
-        return ui.div({"class": "triton-table-card"}, ui.tags.table({"class": "triton-table"}, ui.tags.thead(ui.tags.tr(*[ui.tags.th(x) for x in ["#", "Player", "WAR", "Checks", *[m["label"] for m in TRITON_ZONE_METRICS]]])), ui.tags.tbody(*body)))
+        headers = ["#", "Player", "Conference", "Ht", "MPG", "Triton Zone ↓", "Zone", *[m["label"] for m in TRITON_ZONE_METRICS], "Archetype"]
+        return ui.div({"class": "triton-table-card"}, ui.tags.table({"class": "triton-table"}, ui.tags.thead(ui.tags.tr(*[ui.tags.th(x) for x in headers])), ui.tags.tbody(*body)))
 
     @output
     @render.ui

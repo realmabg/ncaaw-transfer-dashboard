@@ -1174,7 +1174,7 @@ html, body {
   border-collapse:collapse;
 }
 .historical-table { min-width:1120px; }
-.triton-table { min-width:1180px; }
+.triton-table { min-width:1380px; }
 .historical-table th,
 .historical-table td,
 .triton-table th,
@@ -1237,7 +1237,7 @@ html, body {
 }
 .triton-filter-row {
   display:grid;
-  grid-template-columns:repeat(4, minmax(0, 1fr));
+  grid-template-columns:repeat(5, minmax(0, 1fr));
   gap:18px 22px;
   align-items:start;
 }
@@ -1245,7 +1245,7 @@ html, body {
   margin-top:16px;
   padding-top:16px;
   border-top:1px solid var(--rule);
-  grid-template-columns:minmax(0,1.7fr) repeat(3, minmax(0,1fr));
+  grid-template-columns:minmax(0,1.7fr) repeat(3, minmax(0,1fr)) minmax(0,.7fr);
 }
 .triton-header-card input[type="text"],
 .triton-header-card select {
@@ -1284,6 +1284,14 @@ html, body {
   color:var(--ink-2);
   font-size:12px;
   margin-right:14px;
+}
+.triton-filter-field--wide .checkbox label {
+  color:var(--ink-3);
+  font-size:11px;
+  display:flex;
+  align-items:center;
+  gap:7px;
+  margin-top:8px;
 }
 .triton-more {
   margin-top:18px;
@@ -1363,6 +1371,21 @@ html, body {
   border:1px solid var(--rule-2);
   color:var(--ink-3);
   font-size:11px;
+}
+.triton-arch-tags {
+  display:flex;
+  gap:5px;
+  flex-wrap:wrap;
+}
+.triton-arch-tag {
+  border-color:var(--accent);
+  color:var(--accent);
+  font-size:10px;
+  letter-spacing:.04em;
+}
+.triton-arch-tag.is-empty {
+  border-color:transparent;
+  color:var(--ink-3);
 }
 .triton-zone-badge.is-full,
 .triton-metric.is-pass {
