@@ -122,6 +122,74 @@ HISTORICAL_FEATURES = [
     ("DRB_pct", "drb_pct", 0.45), ("three_share", "three_share", 0.45),
     ("rim_share", "rim_share", 0.3), ("mid_share", "mid_share", 0.25),
 ]
+SIMILARITY_COMPARE_CATEGORIES = [
+    ("role", "Role + Production", [
+        ("height_inches", "Height"),
+        ("mins_per_game", "MPG"),
+        ("pts_per_game", "PPG"),
+        ("treb_per_game", "RPG"),
+        ("ast_per_game", "APG"),
+        ("bpm", "BPM"),
+        ("porpag", "PORPAG"),
+    ]),
+    ("shooting", "Shooting + Shot Mix", [
+        ("eFG", "eFG%"),
+        ("ts", "TS%"),
+        ("3P_pct", "3P%"),
+        ("three_share", "3PA/FGA"),
+        ("rim_share", "Rim share"),
+        ("mid_share", "Mid share"),
+        ("rim_pct", "Rim FG%"),
+        ("mid_pct", "Mid FG%"),
+    ]),
+    ("creation", "Creation + Ball Security", [
+        ("AST_TOV", "AST/TOV"),
+        ("AST_pct", "AST%"),
+        ("TOV_pct", "TOV%"),
+        ("three_pa_per_100", "3PA/100"),
+        ("FTR", "FTR"),
+    ]),
+    ("defense", "Defense + Rebounding", [
+        ("ORB_pct", "ORB%"),
+        ("DRB_pct", "DRB%"),
+        ("Stl_pct", "STL%"),
+        ("Blk_pct", "BLK%"),
+        ("stops_per_40", "Stops/40"),
+    ]),
+]
+CURRENT_TO_COMPARE_KEY = {
+    "mins_per_game": "mpg",
+    "pts_per_game": "ppg",
+    "treb_per_game": "rpg",
+    "ast_per_game": "apg",
+    "stl_per_game": "spg",
+    "blk_per_game": "bpg",
+    "bpm": "bpm",
+    "porpag": "porpag",
+    "eFG": "efg",
+    "ts": "ts",
+    "3P_pct": "tp",
+    "three_share": "three_share",
+    "AST_TOV": "ast_tov",
+    "AST_pct": "ast_pct",
+    "TOV_pct": "tov_pct",
+    "ORB_pct": "orb_pct",
+    "DRB_pct": "drb_pct",
+    "Stl_pct": "stl_pct",
+    "Blk_pct": "blk_pct",
+    "FTR": "ftr",
+    "three_pa_per_100": "three_pa_per_100",
+    "rim_share": "rim_share",
+    "mid_share": "mid_share",
+    "rim_pct": "rim_pct",
+    "mid_pct": "mid_pct",
+    "stops_per_40": "stops_per_40",
+}
+PERCENT_COMPARE_KEYS = {
+    "eFG", "ts", "3P_pct", "three_share", "rim_share", "mid_share",
+    "rim_pct", "mid_pct", "AST_pct", "TOV_pct", "ORB_pct", "DRB_pct",
+    "Stl_pct", "Blk_pct",
+}
 
 
 def dataset_status_text() -> str:
@@ -251,6 +319,115 @@ def historical_metric(row, col, fmt="{:.1f}", default="N/A"):
     return default if not np.isfinite(value) else fmt.format(value)
 
 
+def compare_value(stat_key, value):
+    num = _as_float(value)
+    if not np.isfinite(num):
+        return "-"
+    if stat_key == "height_inches":
+        return height_str(num)
+    if stat_key in PERCENT_COMPARE_KEYS:
+        return f"{num * 100:.1f}%"
+    return f"{num:.1f}"
+
+
+def current_compare_profile_from_row(row):
+    profile = {
+        "player_name": str(row.get("name", "") or "").strip(),
+        "team": str(row.get("team", "") or "").strip(),
+        "conf": str(row.get("confName", row.get("conf", "")) or "").strip(),
+        "year": str(row.get("season", "2026")),
+        "player_id": str(row.get("id", "") or "").strip(),
+        "subtitle": " · ".join([bit for bit in [str(row.get("team", "") or ""), str(row.get("cls", "") or ""), str(row.get("primary_archetype", "") or "")] if bit]),
+        "height_inches": _as_float(row.get("heightIn")),
+    }
+    for compare_key, row_key in CURRENT_TO_COMPARE_KEY.items():
+        profile[compare_key] = _as_float(row.get(row_key))
+    return profile
+
+
+def historical_compare_profile_from_row(row):
+    profile = {
+        "player_name": str(row.get("player_name", "") or "").strip(),
+        "team": str(row.get("team", "") or "").strip(),
+        "conf": str(row.get("conf", "") or "").strip(),
+        "year": _as_float(row.get("year")),
+        "player_id": "",
+        "subtitle": historical_profile_subtitle(row),
+        "height_inches": _as_float(row.get("height_inches")),
+    }
+    for compare_key in CURRENT_TO_COMPARE_KEY:
+        profile[compare_key] = _as_float(row.get(compare_key))
+    return profile
+
+
+def compare_header_name(profile):
+    name = str(profile.get("player_name", "") or "Player")
+    year = _as_float(profile.get("year"), np.nan)
+    return name if not np.isfinite(year) else f"{name} '{int(year) % 100:02d}"
+
+
+def make_similarity_compare_modal(source_profile, target_profile):
+    profiles = [source_profile, target_profile]
+    grid_cols = "minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 1fr)"
+    sections = []
+    for _key, label, stats in SIMILARITY_COMPARE_CATEGORIES:
+        rows = []
+        for stat_key, stat_label in stats:
+            if all(not np.isfinite(_as_float(profile.get(stat_key))) for profile in profiles):
+                continue
+            rows.append(
+                ui.div(
+                    {"class": "compare-stat-row", "style": f"grid-template-columns:{grid_cols};"},
+                    ui.div(stat_label, class_="compare-stat-label"),
+                    *[ui.div(compare_value(stat_key, profile.get(stat_key)), class_="compare-stat-value") for profile in profiles],
+                )
+            )
+        if rows:
+            sections.append(
+                ui.div(
+                    ui.div(label, class_="compare-section-title"),
+                    ui.div(
+                        {"class": "compare-stat-head", "style": f"grid-template-columns:{grid_cols};"},
+                        ui.div("Stat", class_="compare-stat-label"),
+                        *[ui.div(compare_header_name(profile), class_="compare-stat-player") for profile in profiles],
+                    ),
+                    *rows,
+                    class_="compare-section",
+                )
+            )
+    target_id = str(target_profile.get("player_id", "") or "")
+    body = ui.div(
+        {"id": "compare-detail-body"},
+        ui.div(
+            {"class": "compare-player-grid"},
+            *[
+                ui.div(
+                    ui.div(
+                        ui.div(profile["player_name"], class_="compare-player-name"),
+                        ui.tags.button(
+                            {"class": "pill-btn compare-player-inline-btn", "onclick": f"Shiny.setInputValue('modal_compare_open_target',{json.dumps(target_id)},{{priority:'event'}})"},
+                            "Full stats",
+                        ) if idx == 1 and target_id else ui.div(),
+                        class_="compare-player-head",
+                    ),
+                    ui.div(profile.get("subtitle", ""), class_="compare-player-sub"),
+                    ui.div(f"Height: {compare_value('height_inches', profile.get('height_inches'))}", class_="compare-player-sub"),
+                    class_="compare-player-card",
+                )
+                for idx, profile in enumerate(profiles)
+            ],
+        ),
+        ui.div({"class": "compare-modal-shell"}, *sections),
+    )
+    return ui.modal(
+        body,
+        title=ui.HTML(f"Player Comparison <b>· {html.escape(source_profile['player_name'])} vs {html.escape(target_profile['player_name'])}</b>"),
+        easy_close=True,
+        size="xl",
+        footer=None,
+    )
+
+
 def tracker_default_rows(limit=3):
     if HISTORICAL.empty or "team" not in HISTORICAL.columns:
         return []
@@ -281,10 +458,16 @@ def tracker_comp_rows(row, comps, board_index=0):
     if not comps:
         return [ui.div("No current-player comps available for this historical profile.", class_="similarity-beta-empty")]
     rows = []
+    source_id = str(row.get("season_player_id", "") or "")
     for comp in comps:
+        payload = {"source_id": source_id, "target_id": str(comp.get("id", "") or "")}
         rows.append(
             ui.div(
-                {"class": "similarity-beta-row similarity-beta-row--clickable", "onclick": f"Shiny.setInputValue('d1_select_similar',{json.dumps(str(comp['id']))},{{priority:'event'}})"},
+                {
+                    "class": "similarity-beta-row similarity-beta-row--clickable",
+                    "onclick": f"Shiny.setInputValue('hist_open_compare',{json.dumps(payload)},{{priority:'event'}})",
+                    "title": f"Compare {row.get('player_name', 'ideal player')} to {comp['name']}",
+                },
                 ui.div(str(comp["rank"]), class_="similarity-beta-rank"),
                 ui.div("-", class_="similarity-beta-move flat"),
                 ui.div(
@@ -300,15 +483,21 @@ def tracker_comp_rows(row, comps, board_index=0):
     return rows
 
 
-def historical_current_comp_cards(comps):
+def historical_current_comp_cards(comps, source_id=""):
     if not comps:
         return []
     cards = []
     for comp in comps:
         badge_color = ARCHETYPE_COLOR.get(comp.get("primary_archetype", ""), position_color(comp.get("pos", "")))
+        payload = {"source_id": str(source_id or ""), "target_id": str(comp.get("id", "") or "")}
+        onclick = (
+            f"Shiny.setInputValue('hist_open_compare',{json.dumps(payload)},{{priority:'event'}})"
+            if payload["source_id"] and payload["target_id"]
+            else f"Shiny.setInputValue('d1_select_similar',{json.dumps(str(comp['id']))},{{priority:'event'}})"
+        )
         cards.append(
             ui.div(
-                {"class": "historical-comp-card", "onclick": f"Shiny.setInputValue('d1_select_similar',{json.dumps(str(comp['id']))},{{priority:'event'}})"},
+                {"class": "historical-comp-card", "onclick": onclick, "title": f"Compare to {comp['name']}"},
                 ui.div(f"{comp['rank']:02d}", class_="historical-comp-rank"),
                 ui.div(comp["name"], class_="historical-comp-name"),
                 ui.div(
@@ -334,7 +523,7 @@ def historical_stat_cell(label, value):
 def make_historical_detail_modal(row, saved_ids):
     row_id = str(row.get("season_player_id", ""))
     comps = historical_current_comps(row)
-    comp_cards = historical_current_comp_cards(comps)
+    comp_cards = historical_current_comp_cards(comps, source_id=row_id)
     saved = row_id in saved_ids
     arch = str(row.get("archetype", ""))
     accent = ARCHETYPE_COLOR.get(arch, position_color(row.get("pos", "")))
@@ -353,10 +542,22 @@ def make_historical_detail_modal(row, saved_ids):
         historical_stat_cell("3PA/FGA", historical_metric(row, "three_share", "{:.1%}")),
     ]
     body = ui.div(
-        {"id": "detail-body", "class": "historical-detail-body"},
+        {"class": "historical-profile-grid"},
         ui.div(
-            {"class": "detail-col"},
-            ui.div(str(row.get("player_name", "Unknown player")), class_="player-name"),
+            {"class": "historical-profile-col"},
+            ui.div(
+                ui.div(str(row.get("player_name", "Unknown player")), class_="player-name"),
+                ui.div(
+                    ui.tags.button("Close", class_="historical-profile-close", **{"data-bs-dismiss": "modal", "type": "button"}),
+                    ui.tags.button(
+                        "Saved to Tracker" if saved else "Save to Tracker",
+                        class_="triton-tracker-toggle is-tracked" if saved else "triton-tracker-toggle",
+                        onclick=f"Shiny.setInputValue('tracker_toggle',{json.dumps(row_id)},{{priority:'event'}})",
+                    ),
+                    class_="historical-profile-actions",
+                ),
+                class_="historical-profile-name-row",
+            ),
             ui.div(ui.span({"class": "team-dot", "style": f"background:{accent}"}), historical_profile_subtitle(row), class_="player-team"),
             ui.div(
                 {"class": "bio-grid"},
@@ -369,19 +570,14 @@ def make_historical_detail_modal(row, saved_ids):
                 bio_item("Height", height_str(_as_float(row.get("height_inches"), 0)), mono=True),
                 bio_item("Min/G", historical_metric(row, "mins_per_game"), mono=True),
             ),
-            ui.tags.button(
-                "Saved to Tracker" if saved else "Save to Tracker",
-                class_="similarity-beta-more",
-                onclick=f"Shiny.setInputValue('tracker_toggle',{json.dumps(row_id)},{{priority:'event'}})",
-            ),
         ),
         ui.div(
-            {"class": "detail-col historical-modal-stats"},
+            {"class": "historical-profile-col historical-profile-col--stats"},
             ui.div("Season Statline", ui.span("2021-25 historical pool", class_="sub"), class_="col-title"),
             ui.div({"class": "statline"}, *statline),
         ),
         ui.div(
-            {"class": "detail-col historical-modal-comps"},
+            {"class": "historical-profile-col"},
             ui.div("Current Players Most Like This Profile", ui.span("2026 WBB D-I pool", class_="sub"), class_="col-title"),
             ui.div({"class": "historical-comp-list"}, *(comp_cards if comp_cards else [ui.div("No current-player comps are available for that historical profile yet.", class_="historical-empty")])),
         ),
@@ -420,7 +616,7 @@ def tracker_ideal_card(row, board_index=0, saved=False):
         ui.tags.button(
             "Open in Historical",
             class_="similarity-beta-more",
-            onclick=f"Shiny.setInputValue('hist_select_row',{json.dumps(row_id)},{{priority:'event'}});switchTab('hist');",
+            onclick=f"switchTab('hist');window.ucsdOpenHistoricalProfile ? window.ucsdOpenHistoricalProfile({json.dumps(row_id)}) : Shiny.setInputValue('hist_select_row',{json.dumps(row_id)},{{priority:'event'}});",
         ),
     )
 
@@ -1302,6 +1498,42 @@ app_ui = ui.page_fluid(
                 window.__codexD1ScatterBindInterval = window.setInterval(bindD1ScatterClick, 1000);
             }
 
+            function historicalScrollState() {
+                var panel = document.getElementById('hist-tab');
+                var table = document.querySelector('.historical-results-table-card');
+                return {
+                    panelTop: panel ? panel.scrollTop : 0,
+                    tableTop: table ? table.scrollTop : 0,
+                    tableLeft: table ? table.scrollLeft : 0
+                };
+            }
+
+            function restoreHistoricalScrollState(state) {
+                if (!state) return;
+                var restore = function() {
+                    var panel = document.getElementById('hist-tab');
+                    var table = document.querySelector('.historical-results-table-card');
+                    if (panel) panel.scrollTop = state.panelTop || 0;
+                    if (table) {
+                        table.scrollTop = state.tableTop || 0;
+                        table.scrollLeft = state.tableLeft || 0;
+                    }
+                };
+                restore();
+                requestAnimationFrame(function() {
+                    restore();
+                    requestAnimationFrame(restore);
+                });
+            }
+
+            window.ucsdOpenHistoricalProfile = function(rowId) {
+                window.__historicalScrollState = historicalScrollState();
+                if (window.Shiny && window.Shiny.setInputValue) {
+                    window.Shiny.setInputValue('hist_select_row', rowId, {priority:'event'});
+                }
+                restoreHistoricalScrollState(window.__historicalScrollState);
+            };
+
             function switchTab(tab) {
                 document.querySelectorAll('.tab-panel').forEach(function(p) { p.classList.remove('active'); });
                 document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active-d1','active-wl','active-hist','active-triton','active-tracker','active-lineup'); });
@@ -1318,6 +1550,9 @@ app_ui = ui.page_fluid(
                             if (window.Plotly) Plotly.Plots.resize(el);
                         });
                         startD1ScatterBinding();
+                        if (window.__historicalScrollState) {
+                            restoreHistoricalScrollState(window.__historicalScrollState);
+                        }
                     });
                 });
             }
@@ -1329,6 +1564,11 @@ app_ui = ui.page_fluid(
             }
 
             document.addEventListener('shiny:connected', startD1ScatterBinding);
+            document.addEventListener('shiny:value', function() {
+                if (window.__historicalScrollState) {
+                    restoreHistoricalScrollState(window.__historicalScrollState);
+                }
+            }, true);
             """
         ),
     ),
@@ -1533,6 +1773,31 @@ def server(input, output, session):
             modal_req.set((sid, random.random()))
 
     @reactive.effect
+    @reactive.event(input.hist_open_compare)
+    def _hist_open_compare():
+        payload = input.hist_open_compare() or {}
+        if not isinstance(payload, dict):
+            return
+        source_id = str(payload.get("source_id", "") or "").strip()
+        target_id = str(payload.get("target_id", "") or "").strip()
+        source_row = historical_row_by_id(source_id)
+        target_rows = df[df["id"].astype(str).eq(target_id)]
+        if source_row is None or target_rows.empty:
+            return
+        ui.modal_show(make_similarity_compare_modal(historical_compare_profile_from_row(source_row), current_compare_profile_from_row(target_rows.iloc[0])))
+
+    @reactive.effect
+    @reactive.event(input.modal_compare_open_target)
+    def _modal_compare_open_target():
+        pid = str(input.modal_compare_open_target() or "").strip()
+        if not pid:
+            return
+        d1_sel.set(pid)
+        ui.modal_remove()
+        import random
+        modal_req.set((pid, random.random()))
+
+    @reactive.effect
     @reactive.event(input.d1_plot_click)
     def _d1_plot_click():
         click = input.d1_plot_click()
@@ -1723,7 +1988,7 @@ def server(input, output, session):
             row_id = str(row["season_player_id"])
             body.append(
                 ui.tags.tr(
-                    {"class": "is-selected" if row_id == historical_selected.get() else "", "onclick": f"Shiny.setInputValue('hist_select_row','{row_id}',{{priority:'event'}})"},
+                    {"class": "historical-row is-selected" if row_id == historical_selected.get() else "historical-row", "onclick": f"window.ucsdOpenHistoricalProfile && window.ucsdOpenHistoricalProfile({json.dumps(row_id)})"},
                     ui.tags.td(ui.div(str(row["player_name"]), class_="table-player"), ui.div(f"{row['team']} · {int(row['year'])}", class_="table-meta")),
                     ui.tags.td(str(row.get("conf", ""))),
                     ui.tags.td(str(row.get("pos", ""))),
