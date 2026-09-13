@@ -902,24 +902,24 @@ def make_historical_tab():
     return ui.div(
         {"id": "hist-tab", "class": "tab-panel"},
         ui.div(
-            {"class": "beta-shell"},
+            {"class": "historical-shell"},
             ui.div(
-                {"class": "beta-header"},
-                ui.div("Historical Players", class_="beta-title"),
-                ui.div("2021-2025 WBB player-seasons. Click a row to rank the current 2026 pool against that historical profile.", class_="beta-note"),
+                {"class": "historical-header-card"},
+                ui.div("Historical Players", class_="historical-title"),
+                ui.div("Search player", class_="historical-search-label"),
+                ui.input_text("hist_q", None, placeholder="Search a past player..."),
                 ui.div(
-                    {"class": "beta-filter-grid"},
-                    ui.input_text("hist_q", None, placeholder="Search historical player..."),
-                    ui.input_selectize("hist_season", None, choices={str(y): str(y) for y in years}, selected=[], multiple=True, options={"placeholder": "Any season", "plugins": ["remove_button"]}),
-                    ui.input_selectize("hist_conf", None, choices={c: c for c in confs}, selected=[], multiple=True, options={"placeholder": "Any conference", "plugins": ["remove_button"]}),
-                    ui.input_selectize("hist_team", None, choices={t: t for t in teams}, selected=[], multiple=True, options={"placeholder": "Any team", "plugins": ["remove_button"]}),
-                    ui.input_selectize("hist_pos", None, choices={p: p for p in POSITION_GROUP_ORDER + ["G/F", "F/C"]}, selected=[], multiple=True, options={"placeholder": "Any position", "plugins": ["remove_button"]}),
-                    ui.input_selectize("hist_arch", None, choices={a: a for a in arches}, selected=[], multiple=True, options={"placeholder": "Any archetype", "plugins": ["remove_button"]}),
-                    ui.input_slider("hist_height", None, min=int(height_min), max=int(height_max), value=[int(height_min), int(height_max)], step=1),
-                    ui.input_slider("hist_mpg", None, min=float(mpg_min), max=float(mpg_max), value=max(5.0, float(mpg_min)), step=.5),
+                    {"class": "historical-filter-row"},
+                    ui.div({"class": "historical-filter-field"}, ui.div("Season", class_="historical-filter-title"), ui.input_selectize("hist_season", None, choices={str(y): str(y) for y in years}, selected=[], multiple=True, options={"placeholder": "Any season", "plugins": ["remove_button"]})),
+                    ui.div({"class": "historical-filter-field"}, ui.div("Conference", class_="historical-filter-title"), ui.input_selectize("hist_conf", None, choices={c: c for c in confs}, selected=[], multiple=True, options={"placeholder": "Any conference", "plugins": ["remove_button"]})),
+                    ui.div({"class": "historical-filter-field"}, ui.div("Team", class_="historical-filter-title"), ui.input_selectize("hist_team", None, choices={t: t for t in teams}, selected=[], multiple=True, options={"placeholder": "Any team", "plugins": ["remove_button"]})),
+                    ui.div({"class": "historical-filter-field"}, ui.div("Pos", class_="historical-filter-title"), ui.input_selectize("hist_pos", None, choices={p: p for p in POSITION_GROUP_ORDER + ["G/F", "F/C"]}, selected=[], multiple=True, options={"placeholder": "Any position", "plugins": ["remove_button"]})),
+                    ui.div({"class": "historical-filter-field"}, ui.div("Archetype", class_="historical-filter-title"), ui.input_selectize("hist_arch", None, choices={a: a for a in arches}, selected=[], multiple=True, options={"placeholder": "Any archetype", "plugins": ["remove_button"]})),
+                    ui.div({"class": "historical-filter-field historical-filter-field--slider"}, ui.div("Height range", class_="historical-filter-title"), ui.input_slider("hist_height", None, min=int(height_min), max=int(height_max), value=[int(height_min), int(height_max)], step=1)),
+                    ui.div({"class": "historical-filter-field historical-filter-field--slider"}, ui.div("Minutes minimum", class_="historical-filter-title"), ui.input_slider("hist_mpg", None, min=float(mpg_min), max=float(mpg_max), value=max(5.0, float(mpg_min)), step=.5)),
                 ),
             ),
-            ui.div({"class": "beta-results-head"}, ui.output_text("hist_results_count")),
+            ui.div({"class": "historical-results-head"}, ui.output_text("hist_results_count"), ui.div("Click a row to rank the current 2026 WBB pool against that historical profile.", class_="historical-results-note")),
             ui.output_ui("historical_table_ui"),
             ui.output_ui("historical_current_comps_ui"),
         ),
@@ -930,28 +930,43 @@ def make_triton_tab():
     return ui.div(
         {"id": "triton-tab", "class": "tab-panel"},
         ui.div(
-            {"class": "beta-shell"},
+            {"class": "triton-shell"},
             ui.div(
-                {"class": "beta-header"},
-                ui.div("Triton Zone", class_="beta-title"),
-                ui.div("Same staff targets as the men's dashboard, applied to 2026 women's D-I players.", class_="beta-note"),
+                {"class": "triton-header-card"},
+                ui.div("Triton Zone", class_="triton-title"),
+                ui.div("Same staff targets as the men's dashboard, applied to 2026 women's D-I players. Players are ranked by weighted fit, with green cells clearing the target.", class_="triton-lede"),
                 ui.div(
-                    {"class": "beta-filter-grid"},
-                    ui.input_text("triton_q", None, placeholder="Search player..."),
-                    ui.input_selectize("triton_conf", None, choices={r["confName"]: r["confName"] for r in conferences}, selected=[], multiple=True, options={"placeholder": "Any conference", "plugins": ["remove_button"]}),
-                    ui.input_selectize("triton_team", None, choices={t: t for t in sorted(df["team"].dropna().unique())}, selected=[], multiple=True, options={"placeholder": "Any team", "plugins": ["remove_button"]}),
-                    ui.input_selectize("triton_pos", None, choices={p: p for p in sorted(df["pos"].dropna().unique())}, selected=[], multiple=True, options={"placeholder": "Any position", "plugins": ["remove_button"]}),
-                    ui.input_radio_buttons("triton_arch", None, choices=TRITON_ARCHETYPE_FILTERS, selected="all", inline=True),
-                    ui.input_slider("triton_min_mpg", None, min=0, max=35, value=TRITON_DEFAULT_MIN_MPG, step=.5),
-                    ui.input_slider("triton_min_gp", None, min=0, max=35, value=TRITON_DEFAULT_MIN_GP, step=1),
-                    ui.input_slider("triton_min_checks", None, min=0, max=len(TRITON_ZONE_METRICS), value=0, step=1),
+                    {"class": "triton-filter-row"},
+                    ui.div({"class": "triton-filter-field"}, ui.div("Search player", class_="triton-filter-title"), ui.input_text("triton_q", None, placeholder="Search a player...")),
+                    ui.div({"class": "triton-filter-field"}, ui.div("Conference", class_="triton-filter-title"), ui.input_selectize("triton_conf", None, choices={r["confName"]: r["confName"] for r in conferences}, selected=[], multiple=True, options={"placeholder": "Any conference", "plugins": ["remove_button"]})),
+                    ui.div({"class": "triton-filter-field"}, ui.div("Team", class_="triton-filter-title"), ui.input_selectize("triton_team", None, choices={t: t for t in sorted(df["team"].dropna().unique())}, selected=[], multiple=True, options={"placeholder": "Any team", "plugins": ["remove_button"]})),
+                    ui.div({"class": "triton-filter-field"}, ui.div("Pos", class_="triton-filter-title"), ui.input_selectize("triton_pos", None, choices={p: p for p in sorted(df["pos"].dropna().unique())}, selected=[], multiple=True, options={"placeholder": "Any position", "plugins": ["remove_button"]})),
                 ),
-                ui.div({"class": "triton-targets"}, *[
-                    ui.div(ui.span(metric["label"]), ui.span(f"{metric['target']:.0f}{'%' if metric['col'] != 'heightIn' else ''}"), class_="triton-target")
-                    for metric in TRITON_ZONE_METRICS
-                ]),
+                ui.div(
+                    {"class": "triton-filter-row triton-filter-row--second"},
+                    ui.div({"class": "triton-filter-field triton-filter-field--wide"}, ui.div("Archetype filter", class_="triton-filter-title"), ui.input_radio_buttons("triton_arch", None, choices=TRITON_ARCHETYPE_FILTERS, selected="all", inline=True)),
+                    ui.div({"class": "triton-filter-field triton-filter-field--slider"}, ui.div("Minutes per game minimum", class_="triton-filter-title"), ui.input_slider("triton_min_mpg", None, min=0, max=35, value=TRITON_DEFAULT_MIN_MPG, step=.5)),
+                    ui.div({"class": "triton-filter-field triton-filter-field--slider"}, ui.div("Games played minimum", class_="triton-filter-title"), ui.input_slider("triton_min_gp", None, min=0, max=35, value=TRITON_DEFAULT_MIN_GP, step=1)),
+                    ui.div({"class": "triton-filter-field triton-filter-field--slider"}, ui.div("Zone checks cleared minimum", class_="triton-filter-title"), ui.input_slider("triton_min_checks", None, min=0, max=len(TRITON_ZONE_METRICS), value=0, step=1)),
+                ),
+                ui.tags.details(
+                    {"class": "triton-more"},
+                    ui.tags.summary("Triton Zone thresholds"),
+                    ui.div("The current fixed targets match the men’s dashboard target set.", class_="triton-more-note"),
+                    ui.div(
+                        {"class": "triton-threshold-grid"},
+                        *[
+                            ui.div(
+                                {"class": "triton-threshold-field"},
+                                ui.div(ui.span(metric["label"], class_="triton-threshold-name"), ui.span(metric["long"], class_="triton-threshold-hint"), class_="triton-threshold-head"),
+                                ui.div(f"{metric['target']:.0f}{'%' if metric['col'] != 'heightIn' else ''}", class_="triton-threshold-static"),
+                            )
+                            for metric in TRITON_ZONE_METRICS
+                        ],
+                    ),
+                ),
             ),
-            ui.div({"class": "beta-results-head"}, ui.output_text("triton_results_count")),
+            ui.div({"class": "triton-results-head"}, ui.output_text("triton_results_count"), ui.div("Click a row to open the player profile.", class_="triton-results-note")),
             ui.output_ui("triton_table_ui"),
         ),
     )
@@ -961,8 +976,8 @@ def make_tracker_tab():
     return ui.div(
         {"id": "tracker-tab", "class": "tab-panel"},
         ui.div(
-            {"class": "beta-shell"},
-            ui.div({"class": "beta-header"}, ui.div("Triton Tracker", class_="beta-title"), ui.div("Save historical ideals, then compare the current 2026 WBB pool against those profiles.", class_="beta-note")),
+            {"class": "historical-shell tracker-shell"},
+            ui.div({"class": "historical-header-card"}, ui.div("Triton Tracker", class_="historical-title"), ui.div("Save historical ideals, then compare the current 2026 WBB pool against those profiles.", class_="historical-results-note")),
             ui.output_ui("tracker_ui"),
         ),
     )
@@ -972,11 +987,11 @@ def make_lineup_tab():
     return ui.div(
         {"id": "lineup-tab", "class": "tab-panel"},
         ui.div(
-            {"class": "beta-shell"},
+            {"class": "historical-shell lineup-shell"},
             ui.div(
-                {"class": "beta-header"},
-                ui.div("UCSD 2026-27 Lineup Beta", class_="beta-title"),
-                ui.div(ui.HTML(f"Watchlist-driven lineup sketch. Use the <a href='{UCSD_WBB_ROSTER_URL}' target='_blank'>official UC San Diego women's roster</a> as the roster reference."), class_="beta-note"),
+                {"class": "historical-header-card"},
+                ui.div("UCSD 2026-27 Lineup Beta", class_="historical-title"),
+                ui.div(ui.HTML(f"Watchlist-driven lineup sketch. Use the <a href='{UCSD_WBB_ROSTER_URL}' target='_blank'>official UC San Diego women's roster</a> as the roster reference."), class_="historical-results-note"),
             ),
             ui.output_ui("lineup_ui"),
         ),
@@ -1415,7 +1430,7 @@ def server(input, output, session):
     def historical_table_ui():
         rows = historical_filtered()
         if rows.empty:
-            return ui.div("No historical players match those filters.", class_="beta-empty")
+            return ui.div("No historical players match those filters.", class_="historical-empty")
         body = []
         saved = tracker_ids.get()
         for _, row in rows.iterrows():
@@ -1435,14 +1450,14 @@ def server(input, output, session):
                     ui.tags.td(ui.tags.button("Saved" if row_id in saved else "Save", class_="mini-btn", onclick=f"event.stopPropagation();Shiny.setInputValue('tracker_toggle','{row_id}',{{priority:'event'}})")),
                 )
             )
-        return ui.div({"class": "beta-table-wrap"}, ui.tags.table({"class": "beta-table"}, ui.tags.thead(ui.tags.tr(*[ui.tags.th(x) for x in ["Player", "Conf", "Pos", "Archetype", "MPG", "PPG", "APG", "RPG", "BPM", "Tracker"]])), ui.tags.tbody(*body)))
+        return ui.div({"class": "historical-table-card historical-results-table-card"}, ui.tags.table({"class": "historical-table"}, ui.tags.thead(ui.tags.tr(*[ui.tags.th(x) for x in ["Player", "Conf", "Pos", "Archetype", "MPG", "PPG", "APG", "RPG", "BPM", "Tracker"]])), ui.tags.tbody(*body)))
 
     @output
     @render.ui
     def historical_current_comps_ui():
         row = historical_row_by_id(historical_selected.get())
         if row is None:
-            return ui.div("Select a historical player to load current 2026 comps.", class_="beta-empty")
+            return ui.div("Select a historical player to load current 2026 comps.", class_="historical-empty")
         comps = historical_current_comps(row)
         cards = [
             ui.div(
@@ -1465,28 +1480,38 @@ def server(input, output, session):
     def triton_table_ui():
         rows = triton_filtered()
         if rows.empty:
-            return ui.div("No players match those Triton Zone filters.", class_="beta-empty")
+            return ui.div("No players match those Triton Zone filters.", class_="triton-empty")
         body = []
         for rank, (_, row) in enumerate(rows.iterrows(), start=1):
-            cells = [ui.tags.td(f"{_as_float(row.get(f'triton_val_{m['key']}'), 0):.1f}", class_="ok-cell" if row.get(f"triton_ok_{m['key']}", False) else "") for m in TRITON_ZONE_METRICS]
+            cells = [
+                ui.tags.td(
+                    ui.span(
+                        f"{_as_float(row.get(f'triton_val_{m['key']}'), 0):.1f}",
+                        class_=f"triton-metric {'is-pass' if row.get(f'triton_ok_{m['key']}', False) else 'is-miss'}",
+                    )
+                )
+                for m in TRITON_ZONE_METRICS
+            ]
+            war = max(0, min(100, _as_float(row.get("triton_war"), 0)))
+            checks_passed = int(row["triton_checks_passed"])
             body.append(
                 ui.tags.tr(
                     {"onclick": f"Shiny.setInputValue('triton_open_player','{row['id']}',{{priority:'event'}})"},
                     ui.tags.td(str(rank)),
                     ui.tags.td(ui.div(row["name"], class_="table-player"), ui.div(f"{row['team']} · {row['cls']} · {row['primary_archetype']}", class_="table-meta")),
-                    ui.tags.td(f"{row['triton_war']:.0f}"),
-                    ui.tags.td(f"{int(row['triton_checks_passed'])}/{len(TRITON_ZONE_METRICS)}"),
+                    ui.tags.td(ui.div(f"{war:.0f}", class_="triton-war-value"), ui.div({"class": "triton-war-track"}, ui.div({"class": "triton-war-fill", "style": f"width:{war:.1f}%"}))),
+                    ui.tags.td(ui.span(f"{checks_passed}/{len(TRITON_ZONE_METRICS)}", class_=f"triton-zone-badge {'is-full' if checks_passed >= len(TRITON_ZONE_METRICS) else ''}")),
                     *cells,
                 )
             )
-        return ui.div({"class": "beta-table-wrap"}, ui.tags.table({"class": "beta-table"}, ui.tags.thead(ui.tags.tr(*[ui.tags.th(x) for x in ["#", "Player", "WAR", "Checks", *[m["label"] for m in TRITON_ZONE_METRICS]]])), ui.tags.tbody(*body)))
+        return ui.div({"class": "triton-table-card"}, ui.tags.table({"class": "triton-table"}, ui.tags.thead(ui.tags.tr(*[ui.tags.th(x) for x in ["#", "Player", "WAR", "Checks", *[m["label"] for m in TRITON_ZONE_METRICS]]])), ui.tags.tbody(*body)))
 
     @output
     @render.ui
     def tracker_ui():
         ids = sorted(tracker_ids.get())
         if not ids:
-            return ui.div("Save players from Historical Players to build a Triton Tracker board.", class_="beta-empty")
+            return ui.div("Save players from Historical Players to build a Triton Tracker board.", class_="historical-empty")
         panels = []
         for row_id in ids:
             row = historical_row_by_id(row_id)
@@ -1505,7 +1530,7 @@ def server(input, output, session):
     def lineup_ui():
         rows = [r for _, r in watchlist_rows(watchlist.get())]
         if not rows:
-            return ui.div("Add current players to the watchlist to sketch lineup combinations against the UCSD roster reference.", class_="beta-empty")
+            return ui.div("Add current players to the watchlist to sketch lineup combinations against the UCSD roster reference.", class_="historical-empty")
         pool = pd.DataFrame(rows)
         pool = pool.assign(lineup_score=pool["triton_war"].fillna(0) + pool["bpm"].fillna(0) * 2 + pool["primary_score"].fillna(0) * .25)
         guards = pool[pool["pos"].isin(["G", "G/F"])].sort_values("lineup_score", ascending=False).head(2)
