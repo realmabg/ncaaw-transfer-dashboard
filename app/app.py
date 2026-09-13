@@ -127,41 +127,40 @@ HISTORICAL_FEATURES = [
     ("rim_share", "rim_share", 0.3), ("mid_share", "mid_share", 0.25),
 ]
 SIMILARITY_COMPARE_CATEGORIES = [
-    ("tier1", "Tier 1 · Height / Shot Type / Workload", [
+    ("profile_workload", "Tier 1 · Height / Shot Type / Workload", [
         ("height_inches", "Height"),
-        ("mins_per_game", "MPG"),
-        ("pts_per_game", "PPG"),
-        ("eFG", "eFG%"),
-        ("ts", "TS%"),
-        ("3P_pct", "3P%"),
-        ("three_share", "3PA/FGA"),
-        ("rim_share", "Rim share"),
-        ("mid_share", "Mid share"),
-    ]),
-    ("tier2", "Tier 2 · How They Take Shots", [
-        ("assisted_fg_pct", "Total assisted FG%"),
-        ("three_assisted_pct", "3PT assisted%"),
-        ("rim_assisted_pct", "Rim assisted%"),
-        ("mid_assisted_pct", "Mid assisted%"),
-        ("rim_pct", "Rim FG%"),
-        ("mid_pct", "Mid FG%"),
-    ]),
-    ("tier3", "Tier 3 · Ballhandling / Creation", [
-        ("ast_per_game", "APG"),
-        ("AST_TOV", "AST/TOV"),
-        ("AST_pct", "AST%"),
-        ("TOV_pct", "TOV%"),
-        ("three_pa_per_100", "3PA/100"),
+        ("rim_share", "Rim shot rate"),
+        ("mid_share", "Midrange shot rate"),
+        ("three_share", "3PT shot rate"),
+        ("usg", "USG%"),
         ("FTR", "FTR"),
     ]),
-    ("tier4", "Tier 4 · Defense / Rebounding", [
-        ("treb_per_game", "RPG"),
+    ("shot_creation", "Tier 2 · How They Take Shots", [
+        ("assisted_fg_pct", "Total assisted FG%"),
+        ("three_assisted_pct", "3PT assisted%"),
+        ("rim_assisted_pct", "Rim/dunk assisted%"),
+    ]),
+    ("ballhandling", "Tier 3 · Ballhandling", [
+        ("AST_pct", "AST%"),
+        ("TOV_pct", "TOV%"),
+        ("AST_TOV", "AST/TO"),
+    ]),
+    ("efficiency", "Tier 4 · Efficiency", [
+        ("eFG", "eFG%"),
+        ("FT_pct", "FT%"),
+        ("3P_pct", "3PT%"),
+        ("rim_pct", "Rim%"),
+        ("mid_pct", "Midrange%"),
+    ]),
+    ("rebounding", "Tier 5 · Rebounding", [
         ("ORB_pct", "ORB%"),
         ("DRB_pct", "DRB%"),
-        ("Stl_pct", "STL%"),
+    ]),
+    ("defense", "Tier 6 · Defense", [
         ("Blk_pct", "BLK%"),
+        ("Stl_pct", "STL%"),
         ("stops_per_40", "Stops/40"),
-        ("bpm", "BPM"),
+        ("personal_fouls_per_40", "PF/40"),
     ]),
 ]
 CURRENT_TO_COMPARE_KEY = {
@@ -175,6 +174,7 @@ CURRENT_TO_COMPARE_KEY = {
     "porpag": "porpag",
     "eFG": "efg",
     "ts": "ts",
+    "FT_pct": "ft",
     "3P_pct": "tp",
     "three_share": "three_share",
     "AST_TOV": "ast_tov",
@@ -195,12 +195,14 @@ CURRENT_TO_COMPARE_KEY = {
     "mid_assisted_pct": "mid_assisted_pct",
     "three_assisted_pct": "three_assisted_pct",
     "stops_per_40": "stops_per_40",
+    "personal_fouls_per_40": "pf_per_40",
+    "usg": "usg",
 }
 PERCENT_COMPARE_KEYS = {
     "eFG", "ts", "3P_pct", "three_share", "rim_share", "mid_share",
     "rim_pct", "mid_pct", "AST_pct", "TOV_pct", "ORB_pct", "DRB_pct",
     "Stl_pct", "Blk_pct", "assisted_fg_pct", "rim_assisted_pct",
-    "mid_assisted_pct", "three_assisted_pct",
+    "mid_assisted_pct", "three_assisted_pct", "FT_pct", "usg",
 }
 SIMILARITY_VIEW_LABELS = {
     "current": "Current players",
@@ -544,7 +546,13 @@ def compare_value(stat_key, value):
     if stat_key == "height_inches":
         return height_str(num)
     if stat_key in PERCENT_COMPARE_KEYS:
+        if abs(num) > 1 and stat_key in {"usg", "ORB_pct", "DRB_pct", "AST_pct", "TOV_pct", "Stl_pct", "Blk_pct"}:
+            return f"{num:.1f}%"
         return f"{num * 100:.1f}%"
+    if stat_key == "pc":
+        return f"{num:.2f}"
+    if stat_key in {"AST_TOV", "FTR", "personal_fouls_per_40", "stops_per_40", "three_pa_per_100"}:
+        return f"{num:.2f}"
     return f"{num:.1f}"
 
 
@@ -557,6 +565,10 @@ def current_compare_profile_from_row(row):
         "player_id": str(row.get("id", "") or "").strip(),
         "subtitle": " · ".join([bit for bit in [str(row.get("team", "") or ""), str(row.get("cls", "") or ""), str(row.get("primary_archetype", "") or "")] if bit]),
         "height_inches": _as_float(row.get("heightIn")),
+        "PC1": _as_float(row.get("arch_pca_PC1")),
+        "PC2": _as_float(row.get("arch_pca_PC2")),
+        "PC3": _as_float(row.get("arch_pca_PC3")),
+        "PC4": _as_float(row.get("arch_pca_PC4")),
     }
     for compare_key, row_key in CURRENT_TO_COMPARE_KEY.items():
         profile[compare_key] = _as_float(row.get(row_key))
@@ -612,12 +624,39 @@ def make_similarity_input_sections(profile):
 
 def make_similarity_compare_modal(source_profile, target_profile, comparison_origin="historical"):
     profiles = [source_profile, target_profile]
-    grid_cols = "minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 1fr)"
+    grid_cols = f"minmax(0, 1.2fr) {' '.join(['minmax(0, 1fr)' for _ in profiles])}"
+    pc_section = ui.div()
+    if comparison_origin == "current":
+        pc_rows = []
+        for key in ("PC1", "PC2", "PC3", "PC4"):
+            if all(key not in profile for profile in profiles):
+                continue
+            pc_rows.append(
+                ui.div(
+                    {"class": "compare-stat-row", "style": f"grid-template-columns:{grid_cols};"},
+                    ui.div(key, class_="compare-stat-label"),
+                    *[ui.div(compare_value("pc", profile.get(key)), class_="compare-stat-value") for profile in profiles],
+                )
+            )
+        if pc_rows:
+            pc_section = ui.div(
+                ui.div("Current Similarity Inputs", class_="compare-section-title"),
+                ui.div(
+                    {"class": "compare-stat-head", "style": f"grid-template-columns:{grid_cols};"},
+                    ui.div("Stat", class_="compare-stat-label"),
+                    *[ui.div(compare_header_name(profile), class_="compare-stat-player") for profile in profiles],
+                ),
+                *pc_rows,
+                class_="compare-section",
+            )
+
     sections = []
+    omitted_missing_rows = 0
     for _key, label, stats in SIMILARITY_COMPARE_CATEGORIES:
         rows = []
         for stat_key, stat_label in stats:
             if all(not np.isfinite(_as_float(profile.get(stat_key))) for profile in profiles):
+                omitted_missing_rows += 1
                 continue
             rows.append(
                 ui.div(
@@ -639,20 +678,85 @@ def make_similarity_compare_modal(source_profile, target_profile, comparison_ori
                     class_="compare-section",
                 )
             )
+    missing_note = (
+        ui.div("Stats missing for both compared players are hidden.", class_="compare-missing-note")
+        if omitted_missing_rows
+        else ui.div()
+    )
+
+    source_id = str(source_profile.get("player_id", "") or "")
     target_id = str(target_profile.get("player_id", "") or "")
+    footer_buttons = []
+    if source_id:
+        footer_buttons.append(
+            ui.tags.button(
+                {
+                    "class": "pill-btn active",
+                    "onclick": (
+                        "window.__compareModalNavigating = true;"
+                        f"Shiny.setInputValue('modal_compare_back',{json.dumps(source_id)},{{priority:'event'}})"
+                    ),
+                },
+                "Back to player",
+            )
+        )
+    if target_id:
+        footer_buttons.append(
+            ui.tags.button(
+                {
+                    "class": "pill-btn",
+                    "onclick": (
+                        "window.__compareModalNavigating = true;"
+                        f"Shiny.setInputValue('modal_compare_open_target',{json.dumps(target_id)},{{priority:'event'}})"
+                    ),
+                },
+                "Open compared player",
+            )
+        )
+
     title_note = "Current comps profile view" if comparison_origin == "current" else "Historical comps profile view"
     body = ui.div(
         {"id": "compare-detail-body"},
+        ui.tags.script(
+            ui.HTML(
+                f"""
+                setTimeout(function() {{
+                  const modal = document.querySelector('.modal.show');
+                  if (!modal || modal.dataset.compareDismissBound === '1') return;
+                  modal.dataset.compareDismissBound = '1';
+                  window.__compareModalNavigating = false;
+                  modal.addEventListener('hidden.bs.modal', function() {{
+                    if (window.__compareModalNavigating) {{
+                      window.__compareModalNavigating = false;
+                      return;
+                    }}
+                    if ({json.dumps(source_id)}) {{
+                      Shiny.setInputValue('modal_compare_back', {json.dumps(source_id)}, {{priority:'event'}});
+                    }}
+                  }}, {{ once: true }});
+                }}, 0);
+                """
+            )
+        ),
         ui.div(
-            {"class": "compare-player-grid"},
+            {
+                "class": "compare-player-grid",
+                "style": f"grid-template-columns:repeat({len(profiles)}, minmax(0, 1fr));",
+            },
             *[
                 ui.div(
                     ui.div(
                         ui.div(profile["player_name"], class_="compare-player-name"),
                         ui.tags.button(
-                            {"class": "pill-btn compare-player-inline-btn", "onclick": f"Shiny.setInputValue('modal_compare_open_target',{json.dumps(target_id)},{{priority:'event'}})"},
+                            {
+                                "class": "pill-btn compare-player-inline-btn",
+                                "onclick": (
+                                    "window.__compareModalNavigating = true;"
+                                    f"Shiny.setInputValue('modal_compare_open_target',{json.dumps(str(profile.get('player_id', '') or ''))},{{priority:'event'}})"
+                                ),
+                            },
                             "Full stats",
-                        ) if idx == 1 and target_id else ui.div(),
+                        ) if idx == 1 and str(profile.get("player_id", "") or "") else ui.div(),
                         class_="compare-player-head",
                     ),
                     ui.div(profile.get("subtitle", ""), class_="compare-player-sub"),
@@ -662,14 +766,14 @@ def make_similarity_compare_modal(source_profile, target_profile, comparison_ori
                 for idx, profile in enumerate(profiles)
             ],
         ),
-        ui.div({"class": "compare-modal-shell"}, *sections),
+        ui.div({"class": "compare-modal-shell"}, missing_note, pc_section, *sections),
     )
     return ui.modal(
         body,
         title=ui.HTML(f"Similarity Comparison <b>· {html.escape(source_profile['player_name'])}</b> <span class='compare-title-note'>{html.escape(title_note)}</span>"),
         easy_close=True,
         size="xl",
-        footer=None,
+        footer=ui.div({"class": "compare-footer"}, *footer_buttons),
     )
 
 
@@ -1475,28 +1579,39 @@ def make_detail_modal(player_id, frame, league_avg_map, similar_fn, watchlist, s
     star_icon = "\u2605" if starred else "\u2606"
     star_label = "Remove from watchlist" if starred else "Add to watchlist"
     star_style = "color:var(--accent);" if starred else "color:var(--ink-3);"
+    pf_per_game = _as_float(row.get("pf_per_40")) * _as_float(row.get("mpg"), 0) / 40
+    avg_pf_per_game = _as_float(league_avg_map.get("pf_per_40"), 0) * _as_float(league_avg_map.get("mpg"), 0) / 40
     statline = [
         stat_box("MIN", f"{row['mpg']:.1f}", league_avg_map["mpg"]),
         stat_box("PTS", f"{row['ppg']:.1f}", league_avg_map["ppg"]),
         stat_box("REB", f"{row['rpg']:.1f}", league_avg_map["rpg"]),
         stat_box("AST", f"{row['apg']:.1f}", league_avg_map["apg"]),
+        stat_box("TOV", f"{row['tov']:.1f}", league_avg_map["tov"]),
+        stat_box("FOUL", f"{pf_per_game:.1f}", avg_pf_per_game) if np.isfinite(pf_per_game) else ui.div(),
         stat_box("STL", f"{row['spg']:.2f}", league_avg_map["spg"]),
         stat_box("BLK", f"{row['bpg']:.2f}", league_avg_map["bpg"]),
-        stat_box("TOV", f"{row['tov']:.1f}", league_avg_map["tov"]),
         stat_box("FG%", f"{row['fg']*100:.1f}", league_avg_map["fg"] * 100),
         stat_box("3P%", f"{row['tp']*100:.1f}", league_avg_map["tp"] * 100),
         stat_box("FT%", f"{row['ft']*100:.1f}", league_avg_map["ft"] * 100),
     ]
+    assisted_fg_pct = _as_float(row.get("assisted_fg_pct"))
+    if np.isfinite(assisted_fg_pct):
+        statline.append(stat_box("AST'D FG%", f"{assisted_fg_pct*100:.1f}", 0))
     bpm_value = pd.to_numeric(pd.Series([row.get("bpm", np.nan)]), errors="coerce").iloc[0]
     porpag_value = pd.to_numeric(pd.Series([row.get("porpag", np.nan)]), errors="coerce").iloc[0]
-    if pd.notna(bpm_value):
-        statline.append(stat_box("BPM", f"{bpm_value:.1f}", 0))
     efficiency_stats = [
-        ("eFG%", "efg", True), ("2P%", "two_pct", True), ("3P%", "tp", True),
-        ("TS%", "ts", True), ("USG%", "usg", True), ("ORB%", "orb_pct", True),
-        ("DRB%", "drb_pct", True), ("AST%", "ast_pct", True), ("TOV%", "tov_pct", True),
-        ("STL%", "stl_pct", True), ("BLK%", "blk_pct", True), ("FTR", "ftr", False),
-        ("PF/40", "pf_per_40", False), ("Stops/40", "stops_per_40", False),
+        ("eFG%", "efg", True),
+        ("ORB%", "orb_pct", False),
+        ("DRB%", "drb_pct", False),
+        ("AST%", "ast_pct", False),
+        ("STL%", "stl_pct", False),
+        ("BLK%", "blk_pct", False),
+        ("3P%", "tp", True),
+        ("USG%", "usg", True),
+        ("FT%", "ft", True),
+        ("FTR", "ftr", False),
+        ("TOV%", "tov_pct", False),
+        ("PF/40", "pf_per_40", False),
     ]
     eff_cells = []
     for label, col, is_pct in efficiency_stats:
@@ -1572,7 +1687,22 @@ def make_detail_modal(player_id, frame, league_avg_map, similar_fn, watchlist, s
         {"id": "detail-body"},
         ui.div(
             {"class": "detail-col"},
-            ui.div({"class": "player-name-row"}, ui.div(row["name"], class_="player-name"), ui.tags.button({"class": "star-btn", "title": star_label, "style": star_style, "onclick": f"Shiny.setInputValue('toggle_watchlist','{player_id}',{{priority:'event'}})"}, star_icon)),
+            ui.div(
+                {"class": "player-name-row"},
+                ui.div(row["name"], class_="player-name"),
+                ui.tags.button(
+                    {
+                        "class": "star-btn",
+                        "title": star_label,
+                        "style": star_style,
+                        "onclick": (
+                            f"window.ucsdToggleWatchlist ? window.ucsdToggleWatchlist({json.dumps(player_id)}, this) : "
+                            f"Shiny.setInputValue('toggle_watchlist',{json.dumps(player_id)},{{priority:'event'}})"
+                        ),
+                    },
+                    star_icon,
+                ),
+            ),
             ui.div(ui.span({"class": "team-dot", "style": f"background:{pc}"}), f"{row['team']} · {row['confName']}", class_="player-team"),
             ui.div({"class": "bio-grid"}, bio_item("Division", "WBB D-I"), bio_item("Position", position_label(row["pos"])), bio_item("Archetype", row["primary_archetype"]), bio_item("Class", row["cls"]), bio_item("Eligibility Used", str(int(row["eligibility"])), mono=True), bio_item("Height", height_str(int(row["heightIn"])), mono=True), bio_item("Games", str(int(row["gp"])), mono=True), bio_item("Min/G", f"{row['mpg']:.1f}", mono=True), bio_item("BPM", f"{bpm_value:.1f}" if pd.notna(bpm_value) else "N/A", mono=True), bio_item("PORPAG", f"{porpag_value:.2f}" if pd.notna(porpag_value) else "N/A", mono=True)),
             ui.div(ui.div("Archetype", class_="col-title"), *archetype_score_rows(row), class_="arch-score-panel"),
@@ -1918,22 +2048,46 @@ app_ui = ui.page_fluid(
         ui.tags.script(f"""
             (function() {{
                 var KEY = {json.dumps(WATCHLIST_STORAGE_KEY)};
-                function restoreWatchlist() {{
-                    if (!window.Shiny || !window.Shiny.setInputValue || !document.body) return;
-                    if (document.body.dataset.ucsdWbbWatchlistRestored === '1') return;
-                    document.body.dataset.ucsdWbbWatchlistRestored = '1';
+                function readIds() {{
                     var ids = [];
                     try {{
                         var raw = localStorage.getItem(KEY);
                         if (raw) {{
                             var parsed = JSON.parse(raw);
                             if (Array.isArray(parsed)) {{
-                                ids = parsed.filter(function(v) {{ return typeof v === 'string'; }});
+                                ids = parsed.filter(function(v) {{ return typeof v === 'string' && v.trim(); }});
                             }}
                         }}
                     }} catch (err) {{ ids = []; }}
+                    return ids;
+                }}
+                function writeIds(ids) {{
+                    try {{ localStorage.setItem(KEY, JSON.stringify(ids)); }} catch (err) {{}}
+                }}
+                function restoreWatchlist() {{
+                    if (!window.Shiny || !window.Shiny.setInputValue || !document.body) return;
+                    if (document.body.dataset.ucsdWbbWatchlistRestored === '1') return;
+                    document.body.dataset.ucsdWbbWatchlistRestored = '1';
+                    var ids = readIds();
                     window.Shiny.setInputValue('watchlist_restore', {{ids: ids}}, {{priority: 'event'}});
                 }}
+                window.ucsdToggleWatchlist = function(id, button) {{
+                    if (!id) return;
+                    var ids = readIds();
+                    var idx = ids.indexOf(id);
+                    var isSaved = idx === -1;
+                    if (isSaved) ids.push(id);
+                    else ids.splice(idx, 1);
+                    writeIds(ids);
+                    if (button) {{
+                        button.textContent = isSaved ? '★' : '☆';
+                        button.style.color = isSaved ? 'var(--accent)' : 'var(--ink-3)';
+                        button.title = isSaved ? 'Remove from watchlist' : 'Add to watchlist';
+                    }}
+                    if (window.Shiny && window.Shiny.setInputValue) {{
+                        window.Shiny.setInputValue('toggle_watchlist_direct', {{id: id, saved: isSaved, nonce: Date.now()}}, {{priority: 'event'}});
+                    }}
+                }};
                 document.addEventListener('shiny:connected', restoreWatchlist);
                 var tries = 0;
                 var timer = window.setInterval(function() {{
@@ -2161,6 +2315,25 @@ def server(input, output, session):
         modal_req.set((pid, random.random()))
 
     @reactive.effect
+    @reactive.event(input.toggle_watchlist_direct)
+    def _toggle_watchlist_direct():
+        payload = input.toggle_watchlist_direct() or {}
+        if not isinstance(payload, dict):
+            return
+        pid = str(payload.get("id", "") or "").strip()
+        if df[df["id"].astype(str).eq(pid)].empty:
+            return
+        curr = set(watchlist.get())
+        if bool(payload.get("saved")):
+            curr.add(pid)
+        else:
+            curr.discard(pid)
+        watchlist.set(curr)
+        sync_radar_selection(curr)
+        import random
+        modal_req.set((pid, random.random()))
+
+    @reactive.effect
     @reactive.event(input.toggle_dim)
     def _all_dim():
         arch = input.toggle_dim()
@@ -2346,6 +2519,17 @@ def server(input, output, session):
         if source_row is None or target_rows.empty:
             return
         ui.modal_show(make_similarity_compare_modal(historical_compare_profile_from_row(source_row), current_compare_profile_from_row(target_rows.iloc[0])))
+
+    @reactive.effect
+    @reactive.event(input.modal_compare_back)
+    def _modal_compare_back():
+        pid = str(input.modal_compare_back() or "").strip()
+        if not pid:
+            return
+        d1_sel.set(pid)
+        ui.modal_remove()
+        import random
+        modal_req.set((pid, random.random()))
 
     @reactive.effect
     @reactive.event(input.modal_compare_open_target)
