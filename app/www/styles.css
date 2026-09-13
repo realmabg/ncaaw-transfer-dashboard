@@ -1586,7 +1586,7 @@ html, body {
 .compare-section {
   border:1px solid var(--rule);
   background:rgba(255,255,255,0.02);
-  padding:22px 26px;
+  padding:18px 22px;
 }
 .compare-player-head {
   display:flex;
@@ -1626,15 +1626,15 @@ html, body {
 .compare-stat-head,
 .compare-stat-row {
   display:grid;
-  gap:34px;
+  gap:24px;
   align-items:center;
 }
 .compare-stat-head {
-  padding:14px 0 18px;
+  padding:10px 0 14px;
   border-bottom:1px solid rgba(89,113,154,.32);
 }
 .compare-stat-row {
-  min-height:88px;
+  min-height:74px;
   border-bottom:1px solid rgba(89,113,154,.18);
 }
 .compare-stat-row:last-child {
@@ -1643,16 +1643,16 @@ html, body {
 .compare-section-title {
   color:var(--ink);
   font-family:var(--mono);
-  font-size:18px;
+  font-size:15px;
   font-weight:800;
   letter-spacing:.12em;
   text-transform:uppercase;
-  margin-bottom:16px;
+  margin-bottom:12px;
 }
 .compare-stat-label {
   color:var(--ink-2);
   font-family:var(--mono);
-  font-size:19px;
+  font-size:15px;
   text-transform:uppercase;
   letter-spacing:.08em;
 }
@@ -1660,13 +1660,13 @@ html, body {
 .compare-stat-value {
   color:var(--ink);
   font-family:var(--sans);
-  font-size:22px;
+  font-size:18px;
   font-weight:700;
 }
 .compare-stat-value {
   font-family:var(--serif);
   color:var(--ink);
-  font-size:46px;
+  font-size:38px;
   font-weight:600;
   line-height:1;
   letter-spacing:0;
