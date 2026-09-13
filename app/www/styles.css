@@ -1613,15 +1613,15 @@ html, body {
 .compare-stat-head,
 .compare-stat-row {
   display:grid;
-  gap:18px;
+  gap:28px;
   align-items:center;
 }
 .compare-stat-head {
-  padding:10px 0 12px;
+  padding:12px 0 14px;
   border-bottom:1px solid rgba(89,113,154,.32);
 }
 .compare-stat-row {
-  min-height:54px;
+  min-height:70px;
   border-bottom:1px solid rgba(89,113,154,.18);
 }
 .compare-stat-row:last-child {
@@ -1637,9 +1637,9 @@ html, body {
   margin-bottom:12px;
 }
 .compare-stat-label {
-  color:var(--ink-3);
+  color:var(--ink-2);
   font-family:var(--mono);
-  font-size:13px;
+  font-size:16px;
   text-transform:uppercase;
   letter-spacing:.08em;
 }
@@ -1647,14 +1647,15 @@ html, body {
 .compare-stat-value {
   color:var(--ink);
   font-family:var(--sans);
-  font-size:15px;
+  font-size:18px;
   font-weight:700;
 }
 .compare-stat-value {
-  font-family:var(--sans);
+  font-family:var(--serif);
   color:var(--ink);
-  font-size:22px;
-  font-weight:700;
+  font-size:34px;
+  font-weight:600;
+  line-height:1;
   letter-spacing:0;
 }
 .compare-title-note {
