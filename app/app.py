@@ -2,6 +2,7 @@ from pathlib import Path
 import json
 import html
 import math
+import re
 
 import asttokens  # noqa: F401 - direct import lets Shinylive install this transitive dependency.
 import orjson  # noqa: F401 - direct import lets Shinylive install this Shiny dependency.
@@ -209,6 +210,32 @@ SIMILARITY_VIEW_LABELS = {
     "current": "Current players",
     "historical": "Historical comps",
 }
+
+
+def historical_name_key(value) -> str:
+    value = "" if pd.isna(value) else str(value)
+    value = value.lower().strip()
+    value = re.sub(r"\b(jr|sr|ii|iii|iv|v)\b\.?", "", value)
+    return re.sub(r"[^a-z0-9]+", "", value)
+
+
+def historical_big_west_next_year_ids() -> set[str]:
+    required = {"player_name", "year", "conf", "season_player_id"}
+    if HISTORICAL.empty or not required.issubset(HISTORICAL.columns):
+        return set()
+    frame = HISTORICAL.copy()
+    frame["__name_key"] = frame["player_name"].map(historical_name_key)
+    frame["__year"] = pd.to_numeric(frame["year"], errors="coerce")
+    frame["__next_year"] = frame["__year"] + 1
+    conf_text = frame["conf"].fillna("").astype(str).str.strip().str.lower()
+    big_west_next = frame[conf_text.isin({"bw", "big west"}) | conf_text.str.contains("big west", na=False)]
+    next_pairs = set(zip(big_west_next["__name_key"], big_west_next["__year"]))
+    row_pairs = zip(frame["__name_key"], frame["__next_year"])
+    matched = frame[[pair in next_pairs for pair in row_pairs]]
+    return set(matched["season_player_id"].dropna().astype(str))
+
+
+HISTORICAL_BIG_WEST_NEXT_YEAR_IDS = historical_big_west_next_year_ids()
 
 
 def dataset_status_text() -> str:
@@ -626,31 +653,6 @@ def make_similarity_input_sections(profile):
 def make_similarity_compare_modal(source_profile, target_profile, comparison_origin="historical"):
     profiles = [source_profile, target_profile]
     grid_cols = f"minmax(0, 1.2fr) {' '.join(['minmax(0, 1fr)' for _ in profiles])}"
-    pc_section = ui.div()
-    if comparison_origin == "current":
-        pc_rows = []
-        for key in ("PC1", "PC2", "PC3", "PC4"):
-            if all(key not in profile for profile in profiles):
-                continue
-            pc_rows.append(
-                ui.div(
-                    {"class": "compare-stat-row", "style": f"grid-template-columns:{grid_cols};"},
-                    ui.div(key, class_="compare-stat-label"),
-                    *[ui.div(compare_value("pc", profile.get(key)), class_="compare-stat-value") for profile in profiles],
-                )
-            )
-        if pc_rows:
-            pc_section = ui.div(
-                ui.div("Current Similarity Inputs", class_="compare-section-title"),
-                ui.div(
-                    {"class": "compare-stat-head", "style": f"grid-template-columns:{grid_cols};"},
-                    ui.div("Stat", class_="compare-stat-label"),
-                    *[ui.div(compare_header_name(profile), class_="compare-stat-player") for profile in profiles],
-                ),
-                *pc_rows,
-                class_="compare-section",
-            )
-
     sections = []
     omitted_missing_rows = 0
     for _key, label, stats in SIMILARITY_COMPARE_CATEGORIES:
@@ -742,7 +744,7 @@ def make_similarity_compare_modal(source_profile, target_profile, comparison_ori
                 for idx, profile in enumerate(profiles)
             ],
         ),
-        ui.div({"class": "compare-modal-shell"}, missing_note, pc_section, *sections),
+        ui.div({"class": "compare-modal-shell"}, missing_note, *sections),
     )
     return ui.modal(
         body,
@@ -1618,9 +1620,9 @@ def make_detail_modal(player_id, frame, league_avg_map, similar_fn, watchlist, s
         bar_row("TS%", row["ts"], league_avg_map["ts"], 0.75, lambda v: f"{v*100:.1f}%"),
     ]
     shot_cards = [
-        ("Rim", row.get("rim_pct_of_total_attempts"), row.get("rim_pct"), row.get("rim_assisted_pct")),
-        ("Mid", row.get("mid_pct_of_total_attempts"), row.get("mid_pct"), row.get("mid_assisted_pct")),
-        ("3PT", row.get("three_pct_of_total_attempts"), row.get("tp"), row.get("three_assisted_pct")),
+        ("Rim", row.get("rim_pct_of_total_attempts"), row.get("rim_pct"), row.get("pct_rim_made_assisted", row.get("rim_assisted_pct"))),
+        ("Mid", row.get("mid_pct_of_total_attempts"), row.get("mid_pct"), row.get("pct_mid_made_assisted", row.get("mid_assisted_pct"))),
+        ("3PT", row.get("three_pct_of_total_attempts"), row.get("tp"), row.get("pct_three_made_assisted", row.get("three_assisted_pct"))),
     ]
     triton_rows = []
     for metric in TRITON_ZONE_METRICS:
@@ -1735,7 +1737,13 @@ def make_detail_modal(player_id, frame, league_avg_map, similar_fn, watchlist, s
                     ui.div(
                         {"class": "shot-profile-assists"},
                         *[
-                            ui.div({"class": "shot-profile-card"}, ui.div(label, class_="k"), ui.div(pct_display(share), class_="v"), ui.div(f"{pct_display(pct)} FG · {pct_display(ast)} assisted", class_="s"))
+                            ui.div(
+                                {"class": "shot-profile-card"},
+                                ui.div(label, class_="k"),
+                                ui.div(pct_display(share), class_="v"),
+                                ui.div(ui.span("FG", class_="shot-card-label"), ui.span(pct_display(pct)), class_="s"),
+                                ui.div(ui.span("Assisted", class_="shot-card-label"), ui.span(pct_display(ast)), class_="s shot-card-assisted"),
+                            )
                             for label, share, pct, ast in shot_cards
                         ],
                     ),
@@ -1791,6 +1799,7 @@ def make_historical_tab():
                     ui.div({"class": "historical-filter-field"}, ui.div("Team", class_="historical-filter-title"), ui.input_selectize("hist_team", None, choices={t: t for t in teams}, selected=[], multiple=True, options={"placeholder": "Any team", "plugins": ["remove_button"]})),
                     ui.div({"class": "historical-filter-field"}, ui.div("Pos", class_="historical-filter-title"), ui.input_selectize("hist_pos", None, choices={p: p for p in POSITION_GROUP_ORDER + ["G/F", "F/C"]}, selected=[], multiple=True, options={"placeholder": "Any position", "plugins": ["remove_button"]})),
                     ui.div({"class": "historical-filter-field"}, ui.div("Archetype", class_="historical-filter-title"), ui.input_selectize("hist_arch", None, choices={a: a for a in arches}, selected=[], multiple=True, options={"placeholder": "Any archetype", "plugins": ["remove_button"]})),
+                    ui.div({"class": "historical-filter-field historical-filter-field--wide"}, ui.div("Next season", class_="historical-filter-title"), ui.input_radio_buttons("hist_next_scope", None, choices={"all": "All", "big_west_next": "Played in Big West next year"}, selected="all", inline=True)),
                     ui.div({"class": "historical-filter-field historical-filter-field--slider"}, ui.div("Height range", class_="historical-filter-title"), ui.input_slider("hist_height", None, min=int(height_min), max=int(height_max), value=[int(height_min), int(height_max)], step=1)),
                     ui.div({"class": "historical-filter-field historical-filter-field--slider"}, ui.div("Minutes minimum", class_="historical-filter-title"), ui.input_slider("hist_mpg", None, min=float(mpg_min), max=float(mpg_max), value=max(5.0, float(mpg_min)), step=.5)),
                 ),
@@ -2641,6 +2650,8 @@ def server(input, output, session):
         arches = list(input.hist_arch() or [])
         if arches:
             d = d[d["archetype"].isin(arches)]
+        if (input.hist_next_scope() or "all") == "big_west_next":
+            d = d[d["season_player_id"].astype(str).isin(HISTORICAL_BIG_WEST_NEXT_YEAR_IDS)]
         lo, hi = input.hist_height()
         d = d[(pd.to_numeric(d["height_inches"], errors="coerce") >= lo) & (pd.to_numeric(d["height_inches"], errors="coerce") <= hi)]
         d = d[pd.to_numeric(d["mins_per_game"], errors="coerce").fillna(0) >= float(input.hist_mpg())]
