@@ -4,6 +4,7 @@ import html
 import math
 
 import asttokens  # noqa: F401 - direct import lets Shinylive install this transitive dependency.
+import orjson  # noqa: F401 - direct import lets Shinylive install this Shiny dependency.
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -1049,6 +1050,13 @@ def stat_box(lbl, val, avg):
     )
 
 
+def pct_stat_value(value):
+    num = _as_float(value)
+    if not np.isfinite(num):
+        return np.nan
+    return num * 100 if abs(num) <= 1 else num
+
+
 def bar_row(lbl, pv, av, mx, fmt=None):
     fmt = fmt or (lambda v: f"{v:.2f}")
     wp = min(100.0, (pv / mx) * 100) if mx else 0.0
@@ -1576,16 +1584,16 @@ def make_detail_modal(player_id, frame, league_avg_map, similar_fn, watchlist, s
     porpag_value = pd.to_numeric(pd.Series([row.get("porpag", np.nan)]), errors="coerce").iloc[0]
     efficiency_stats = [
         ("eFG%", "efg", True),
-        ("ORB%", "orb_pct", False),
-        ("DRB%", "drb_pct", False),
-        ("AST%", "ast_pct", False),
-        ("STL%", "stl_pct", False),
-        ("BLK%", "blk_pct", False),
+        ("ORB%", "orb_pct", True),
+        ("DRB%", "drb_pct", True),
+        ("AST%", "ast_pct", True),
+        ("STL%", "stl_pct", True),
+        ("BLK%", "blk_pct", True),
         ("3P%", "tp", True),
         ("USG%", "usg", True),
         ("FT%", "ft", True),
         ("FTR", "ftr", False),
-        ("TOV%", "tov_pct", False),
+        ("TOV%", "tov_pct", True),
         ("PF/40", "pf_per_40", False),
     ]
     eff_cells = []
@@ -1595,7 +1603,9 @@ def make_detail_modal(player_id, frame, league_avg_map, similar_fn, watchlist, s
         if not np.isfinite(val):
             continue
         if is_pct:
-            eff_cells.append(stat_box(label, f"{val * 100:.1f}", avg * 100))
+            display_val = pct_stat_value(val)
+            display_avg = pct_stat_value(avg)
+            eff_cells.append(stat_box(label, f"{display_val:.1f}", display_avg))
         else:
             eff_cells.append(stat_box(label, f"{val:.1f}", avg))
     bars = [

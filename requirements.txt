@@ -1,4 +1,5 @@
 asttokens
+orjson
 numpy
 pandas
 plotly
