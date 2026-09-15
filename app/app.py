@@ -645,8 +645,11 @@ def historical_compare_profile_from_row(row):
         "subtitle": historical_profile_subtitle(row),
         "height_inches": _as_float(row.get("height_inches")),
     }
-    for compare_key in CURRENT_TO_COMPARE_KEY:
-        profile[compare_key] = _as_float(row.get(compare_key))
+    for compare_key, source_key in CURRENT_TO_COMPARE_KEY.items():
+        value = _as_float(row.get(compare_key))
+        if not np.isfinite(value) and source_key != compare_key:
+            value = _as_float(row.get(source_key))
+        profile[compare_key] = value
     return profile
 
 

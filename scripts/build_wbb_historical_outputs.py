@@ -83,6 +83,8 @@ def historical_columns(frame: pd.DataFrame) -> pd.DataFrame:
         "Stl_pct",
         "Blk_pct",
         "FTR",
+        "personal_fouls_per_40",
+        "usg",
         "three_share",
         "rim_share",
         "mid_share",
