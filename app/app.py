@@ -504,17 +504,25 @@ def historical_current_comps(row, n=HISTORICAL_CURRENT_LIMIT, min_mpg=10.0):
     return comps
 
 
-def current_historical_comps(row, n=HISTORICAL_CURRENT_LIMIT):
+def current_historical_comps(row, n=HISTORICAL_CURRENT_LIMIT, next_scope="all"):
     if row is None or HISTORICAL.empty:
         return []
     cols = [(h, c, w) for h, c, w in HISTORICAL_FEATURES if h in HISTORICAL.columns and c in df.columns]
     if not cols:
         return []
     historical = HISTORICAL.copy()
+    if next_scope == "big_west_next":
+        historical = historical[historical["season_player_id"].astype(str).isin(HISTORICAL_BIG_WEST_NEXT_YEAR_IDS)]
+        if historical.empty:
+            return []
     if "pos" in historical.columns and "pos" in row:
         historical = historical[historical["pos"].eq(row["pos"])]
         if historical.empty:
             historical = HISTORICAL.copy()
+            if next_scope == "big_west_next":
+                historical = historical[historical["season_player_id"].astype(str).isin(HISTORICAL_BIG_WEST_NEXT_YEAR_IDS)]
+                if historical.empty:
+                    return []
     score = pd.Series(0.0, index=historical.index)
     weight = pd.Series(0.0, index=historical.index)
     for hist_col, current_col, w in cols:
@@ -1550,15 +1558,17 @@ def make_plot_area(prefix):
     )
 
 
-def make_detail_modal(player_id, frame, league_avg_map, similar_fn, watchlist, similarity_metric="mahalanobis", similarity_view="current"):
+def make_detail_modal(player_id, frame, league_avg_map, similar_fn, watchlist, similarity_metric="mahalanobis", similarity_view="current", historical_next_scope="all"):
     row = frame[frame["id"] == player_id].iloc[0]
     if similarity_metric not in SIMILARITY_METRIC_LABELS:
         similarity_metric = "mahalanobis"
     if similarity_view not in SIMILARITY_VIEW_LABELS:
         similarity_view = "current"
+    if historical_next_scope not in {"all", "big_west_next"}:
+        historical_next_scope = "all"
     show_historical_comps = similarity_view == "historical"
     sims = similar_fn(player_id, n_sim=5, metric=similarity_metric)
-    hist_comps = current_historical_comps(row, n=5)
+    hist_comps = current_historical_comps(row, n=5, next_scope=historical_next_scope)
     pc = ARCHETYPE_COLOR.get(row.get("primary_archetype"), position_color(row.get("pos", "")))
     starred = player_id in watchlist
     star_icon = "\u2605" if starred else "\u2606"
@@ -1730,7 +1740,7 @@ def make_detail_modal(player_id, frame, league_avg_map, similar_fn, watchlist, s
             *bars,
             ui.div(ui.tags.b("Bar", style="color:var(--ink-2)"), " = player value.  ", ui.tags.b("Tick", style="color:var(--ink-2)"), " = league mean.", class_="bar-note"),
             ui.div(
-                ui.div("Shot Profile", ui.span("share · FG% · assisted%", class_="sub"), class_="col-title"),
+                ui.div("Shot Profile", ui.span("assisted% · share · FG%", class_="sub"), class_="col-title"),
                 ui.div(
                     {"class": "shot-profile-shell"},
                     ui.div({"class": "shot-profile-pie"}, make_shot_profile_pie_html(row, player_id)),
@@ -1740,9 +1750,9 @@ def make_detail_modal(player_id, frame, league_avg_map, similar_fn, watchlist, s
                             ui.div(
                                 {"class": "shot-profile-card"},
                                 ui.div(label, class_="k"),
-                                ui.div(pct_display(share), class_="v"),
+                                ui.div(pct_display(ast), class_="v"),
+                                ui.div(ui.span("Share", class_="shot-card-label"), ui.span(pct_display(share)), class_="s"),
                                 ui.div(ui.span("FG", class_="shot-card-label"), ui.span(pct_display(pct)), class_="s"),
-                                ui.div(ui.span("Assisted", class_="shot-card-label"), ui.span(pct_display(ast)), class_="s shot-card-assisted"),
                             )
                             for label, share, pct, ast in shot_cards
                         ],
@@ -1765,6 +1775,16 @@ def make_detail_modal(player_id, frame, league_avg_map, similar_fn, watchlist, s
             ),
             ui.div(
                 {"style": "display:block;" if show_historical_comps else "display:none;"},
+                ui.div(
+                    ui.input_radio_buttons(
+                        "modal_historical_next_scope",
+                        None,
+                        choices={"all": "All", "big_west_next": "Played in Big West next year"},
+                        selected=historical_next_scope,
+                        inline=True,
+                    ),
+                    class_="sim-metric-control sim-history-scope-control",
+                ),
                 *(hist_rows if hist_rows else [ui.div("No historical fit rows available.", class_="qual-note")]),
             ),
         ),
@@ -2222,6 +2242,7 @@ def server(input, output, session):
     modal_player = reactive.Value(None)
     modal_similarity_metric = reactive.Value("mahalanobis")
     modal_similarity_view = reactive.Value("current")
+    modal_historical_next_scope = reactive.Value("all")
     historical_selected = reactive.Value(None)
     tracker_ids = reactive.Value(set())
     watchlist_restored = reactive.Value(False)
@@ -2346,7 +2367,7 @@ def server(input, output, session):
         if row.empty:
             return
         modal_player.set(pid)
-        ui.modal_show(make_detail_modal(pid, df, league_avg, similar_to_fn, watchlist.get(), modal_similarity_metric.get(), modal_similarity_view.get()))
+        ui.modal_show(make_detail_modal(pid, df, league_avg, similar_to_fn, watchlist.get(), modal_similarity_metric.get(), modal_similarity_view.get(), modal_historical_next_scope.get()))
 
     @reactive.effect
     @reactive.event(input.modal_similarity_metric)
@@ -2371,6 +2392,20 @@ def server(input, output, session):
         if view == modal_similarity_view.get():
             return
         modal_similarity_view.set(view)
+        pid = modal_player.get()
+        if pid:
+            import random
+            modal_req.set((pid, random.random()))
+
+    @reactive.effect
+    @reactive.event(input.modal_historical_next_scope)
+    def _modal_historical_next_scope_changed():
+        scope = input.modal_historical_next_scope()
+        if scope not in {"all", "big_west_next"}:
+            scope = "all"
+        if scope == modal_historical_next_scope.get():
+            return
+        modal_historical_next_scope.set(scope)
         pid = modal_player.get()
         if pid:
             import random
