@@ -238,6 +238,30 @@ def historical_big_west_next_year_ids() -> set[str]:
 HISTORICAL_BIG_WEST_NEXT_YEAR_IDS = historical_big_west_next_year_ids()
 
 
+def historical_next_big_west_row(row):
+    required = {"player_name", "year", "conf"}
+    if row is None or HISTORICAL.empty or not required.issubset(HISTORICAL.columns):
+        return None
+    name_key = historical_name_key(row.get("player_name"))
+    year = _as_float(row.get("year"), np.nan)
+    if not name_key or not np.isfinite(year):
+        return None
+    frame = HISTORICAL.copy()
+    conf_text = frame["conf"].fillna("").astype(str).str.strip().str.lower()
+    year_values = pd.to_numeric(frame["year"], errors="coerce")
+    matches = frame[
+        frame["player_name"].map(historical_name_key).eq(name_key)
+        & year_values.eq(year + 1)
+        & (conf_text.isin({"bw", "big west"}) | conf_text.str.contains("big west", na=False))
+    ].copy()
+    if matches.empty:
+        return None
+    matches["__mpg"] = pd.to_numeric(matches.get("mins_per_game"), errors="coerce")
+    matches["__bpm"] = pd.to_numeric(matches.get("bpm"), errors="coerce")
+    matches = matches.sort_values(["__mpg", "__bpm"], ascending=[False, False])
+    return matches.iloc[0]
+
+
 def dataset_status_text() -> str:
     if DATA["source_status"] == "loaded":
         return "2025-26 women's Division I player dataset loaded"
@@ -658,8 +682,8 @@ def make_similarity_input_sections(profile):
     return sections
 
 
-def make_similarity_compare_modal(source_profile, target_profile, comparison_origin="historical"):
-    profiles = [source_profile, target_profile]
+def make_similarity_compare_modal(source_profile, target_profile, comparison_origin="historical", extra_profiles=None):
+    profiles = [source_profile, target_profile, *(extra_profiles or [])]
     grid_cols = f"minmax(0, 1.2fr) {' '.join(['minmax(0, 1fr)' for _ in profiles])}"
     sections = []
     omitted_missing_rows = 0
@@ -2547,7 +2571,18 @@ def server(input, output, session):
         target_rows = df[df["id"].astype(str).eq(target_id)]
         if source_row is None or target_rows.empty:
             return
-        ui.modal_show(make_similarity_compare_modal(historical_compare_profile_from_row(source_row), current_compare_profile_from_row(target_rows.iloc[0])))
+        extra_profiles = []
+        if modal_historical_next_scope.get() == "big_west_next":
+            next_row = historical_next_big_west_row(source_row)
+            if next_row is not None:
+                extra_profiles.append(historical_compare_profile_from_row(next_row))
+        ui.modal_show(
+            make_similarity_compare_modal(
+                current_compare_profile_from_row(target_rows.iloc[0]),
+                historical_compare_profile_from_row(source_row),
+                extra_profiles=extra_profiles,
+            )
+        )
 
     @reactive.effect
     @reactive.event(input.modal_compare_back)
