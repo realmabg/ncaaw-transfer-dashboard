@@ -911,7 +911,7 @@ def historical_current_comp_cards(comps, source_id=""):
     cards = []
     for comp in comps:
         badge_color = ARCHETYPE_COLOR.get(comp.get("primary_archetype", ""), position_color(comp.get("pos", "")))
-        payload = {"source_id": str(source_id or ""), "target_id": str(comp.get("id", "") or "")}
+        payload = {"source_id": str(source_id or ""), "target_id": str(comp.get("id", "") or ""), "origin": "historical_profile"}
         onclick = (
             f"Shiny.setInputValue('hist_open_compare',{json.dumps(payload)},{{priority:'event'}})"
             if payload["source_id"] and payload["target_id"]
@@ -2641,6 +2641,17 @@ def server(input, output, session):
         if source_row is None or target_rows.empty:
             return
         origin = str(payload.get("origin", "") or "").strip()
+        if origin == "historical_profile":
+            ui.modal_show(
+                make_similarity_compare_modal(
+                    current_compare_profile_from_row(target_rows.iloc[0]),
+                    historical_compare_profile_from_row(source_row),
+                    comparison_origin="historical",
+                    back_player_id=target_id,
+                    inline_player_stats=True,
+                )
+            )
+            return
         tracker_style = origin == "tracker" or target_id == str(modal_player.get() or "")
         if tracker_style:
             ui.modal_show(
