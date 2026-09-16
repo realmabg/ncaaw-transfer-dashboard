@@ -319,8 +319,7 @@ def build_dataset(raw: pd.DataFrame) -> pd.DataFrame:
     out["pct_dreb_pos_adj"] = percentile_by_pos(out.assign(pos=out["pos"].replace("", "Unknown")), "dreb_arch", pos_col="pos")
     out["pct_size"] = percentile(out["heightIn"].fillna(0))
 
-    f_heights = out.loc[out["pos"] == "F", "heightIn"].dropna()
-    stretch_big_height_gate = float(f_heights.min()) if not f_heights.empty else float(out["heightIn"].median())
+    stretch_big_height_gate = 73.0
     out["stretch_big_height_gate"] = stretch_big_height_gate
 
     out["meets_high_assist"] = out["pct_assist_creation"] >= THRESHOLDS["high_percentile"]
