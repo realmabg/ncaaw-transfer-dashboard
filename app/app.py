@@ -2068,9 +2068,10 @@ app_ui = ui.page_fluid(
 
             document.addEventListener('wheel', function(ev) {
                 if (!isTritonThresholdInput(ev.target)) return;
-                ev.preventDefault();
-                ev.stopPropagation();
-            }, {capture: true, passive: false});
+                if (document.activeElement === ev.target && ev.target.blur) {
+                    ev.target.blur();
+                }
+            }, {capture: true, passive: true});
 
             function startD1ScatterBinding() {
                 bindD1ScatterClick();
