@@ -29,6 +29,10 @@ That file is scored from the frozen K8 model and covers every 2021-26 player-sea
 
 The frozen K8 scoring file covers the 2021-26 historical and current player pools. The K8 labels are used for current-player profile cards, filters, current-player lists, historical-player filters, historical comparison cards, and archetype score bars.
 
+## Map Axes
+
+The archetype map uses PCA coordinates from the frozen model. PC1 runs from spacing-guard profiles on the low side toward size and rebounding profiles on the high side. PC2 is displayed with lower-usage support roles lower on the map and higher-usage creation profiles higher on the map.
+
 ## Triton Zone Thresholds
 
 The Triton Zone thresholds and special tags are separate from the K8 archetype model. Those controls are rule-based evaluation tools for the tracker and should not be read as the source of the main player archetype label.

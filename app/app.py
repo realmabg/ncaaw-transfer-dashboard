@@ -1332,6 +1332,14 @@ def transform_pc2_series(series):
     return transformed
 
 
+def display_pc2_value(value):
+    return -transform_pc2_value(value)
+
+
+def display_pc2_series(series):
+    return -transform_pc2_series(series)
+
+
 def build_traces(plot_df, selected_id, dimmed_positions, dot_size=9.5, dot_opacity=0.78):
     traces = []
     grouped = plot_df.assign(pos_group=plot_df["pos"].map(position_group))
@@ -1346,7 +1354,7 @@ def build_traces(plot_df, selected_id, dimmed_positions, dot_size=9.5, dot_opaci
             traces.append(
                 go.Scatter(
                     x=transform_pc1_series(rest["arch_pca_PC1"]),
-                    y=transform_pc2_series(rest["arch_pca_PC2"]),
+                    y=display_pc2_series(rest["arch_pca_PC2"]),
                     mode="markers",
                     marker=dict(size=dot_size, color=position_color(position), opacity=alpha, line=dict(width=0)),
                     customdata=cdata(rest),
@@ -1360,7 +1368,7 @@ def build_traces(plot_df, selected_id, dimmed_positions, dot_size=9.5, dot_opaci
             traces.append(
                 go.Scatter(
                     x=[transform_pc1_value(r["arch_pca_PC1"])],
-                    y=[transform_pc2_value(r["arch_pca_PC2"])],
+                    y=[display_pc2_value(r["arch_pca_PC2"])],
                     mode="markers",
                     marker=dict(size=dot_size + 16, color="rgba(0,0,0,0)", line=dict(color="#c8a84b", width=1.5)),
                     hoverinfo="skip",
@@ -1370,7 +1378,7 @@ def build_traces(plot_df, selected_id, dimmed_positions, dot_size=9.5, dot_opaci
             traces.append(
                 go.Scatter(
                     x=[transform_pc1_value(r["arch_pca_PC1"])],
-                    y=[transform_pc2_value(r["arch_pca_PC2"])],
+                    y=[display_pc2_value(r["arch_pca_PC2"])],
                     mode="markers",
                     marker=dict(size=dot_size + 4, color=position_color(position), opacity=1.0, line=dict(color="#0f1623", width=1.8)),
                     customdata=[cdata(sel)[0]],
@@ -1450,21 +1458,21 @@ def build_layout(plot_df, selected_id=None):
     tf = dict(size=10, family="JetBrains Mono, monospace", color="#4a6080")
     selected_row = plot_df[plot_df["id"] == selected_id] if selected_id else plot_df.iloc[0:0]
     selected_x = transform_pc1_value(selected_row["arch_pca_PC1"].iloc[0]) if not selected_row.empty else None
-    selected_y = transform_pc2_value(selected_row["arch_pca_PC2"].iloc[0]) if not selected_row.empty else None
+    selected_y = display_pc2_value(selected_row["arch_pca_PC2"].iloc[0]) if not selected_row.empty else None
     x_plot = transform_pc1_series(plot_df["arch_pca_PC1"])
     x_range = robust_axis_range(x_plot, selected_x)
-    y_plot = transform_pc2_series(plot_df["arch_pca_PC2"])
+    y_plot = display_pc2_series(plot_df["arch_pca_PC2"])
     y_range = robust_axis_range(y_plot, selected_y)
     x_ticks = [-7, -6, -5, -4, -2, 0, 2, 4, 5, 6, 7, 8]
     x_tickvals = [transform_pc1_value(v) for v in x_ticks]
     y_ticks = [-20, -15, -10, -7, -5, 0, 5]
-    tickvals = [transform_pc2_value(v) for v in y_ticks]
+    tickvals = [display_pc2_value(v) for v in y_ticks]
     return go.Layout(
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="#0f1623",
         margin=dict(l=64, r=18, t=16, b=60),
         xaxis=dict(
-            title="PC1 · spacing ↔ rebounding",
+            title="PC1 · spacing guards ↔ size/rebounding",
             title_font=tf,
             range=x_range,
             tickmode="array",
@@ -1487,8 +1495,8 @@ def build_layout(plot_df, selected_id=None):
                 xref="paper",
                 x0=0,
                 x1=1,
-                y0=transform_pc2_value(PC2_LOG_BREAK),
-                y1=transform_pc2_value(PC2_LOG_BREAK),
+                y0=display_pc2_value(PC2_LOG_BREAK),
+                y1=display_pc2_value(PC2_LOG_BREAK),
                 line=dict(color="rgba(74,96,128,0.55)", width=1, dash="dot"),
                 layer="below",
             ),
