@@ -10,6 +10,80 @@ from build_wbb_d1_dataset import build_dataset
 
 DEFAULT_SOURCE_DIR = Path("womens_player_pbp_and_regular_stats_2021_2026")
 DEFAULT_PROCESSED_DIR = Path("data/processed")
+DEFAULT_K8_ARCHETYPES_PATH = Path("all-players-2025-26-core-v1-k8-archetypes copy.csv")
+
+
+K8_ARCHETYPE_LABELS = {
+    "A0": "Traditional Big",
+    "A1": "Midrange-Heavy Role Player",
+    "A2": "Two-Way Star Big",
+    "A3": "Three-Point Specialist",
+    "A4": "Combo Guard",
+    "A5": "Two-Way Star Guard",
+    "A6": "Low-Production Player",
+    "A7": "Efficient Off-Ball Finisher",
+}
+
+
+def apply_k8_archetypes(processed: pd.DataFrame, archetype_path: Path, current_season: int) -> pd.DataFrame:
+    out = processed.copy()
+    score_cols = [f"score_{code.lower()}" for code in K8_ARCHETYPE_LABELS]
+    for col in [*score_cols, "dominant_archetype_code", "dominant_archetype", "top_1_code", "top_1_archetype", "top_1_pct", "top_2_code", "top_2_archetype", "top_2_pct", "top_3_code", "top_3_archetype", "top_3_pct"]:
+        if col not in out.columns:
+            out[col] = pd.NA
+    current_mask = pd.to_numeric(out["season"], errors="coerce").eq(current_season)
+    if not archetype_path.exists():
+        out.loc[current_mask, score_cols] = 0.0
+        out.loc[current_mask, "primary_archetype"] = "Unassigned"
+        out.loc[current_mask, "primary_score"] = 0.0
+        out.loc[current_mask, "primary_score_col"] = ""
+        return out
+
+    archetypes = pd.read_csv(archetype_path)
+    archetypes["__player_id"] = archetypes["player_id"].astype(str)
+    source_cols = [
+        "__player_id",
+        "dominant_archetype_code",
+        "dominant_archetype",
+        "top_1_code",
+        "top_1_archetype",
+        "top_1_pct",
+        "top_2_code",
+        "top_2_archetype",
+        "top_2_pct",
+        "top_3_code",
+        "top_3_archetype",
+        "top_3_pct",
+        *K8_ARCHETYPE_LABELS.keys(),
+    ]
+    merged = out.loc[current_mask, ["id"]].copy()
+    merged["__row_index"] = merged.index
+    merged["__player_id"] = merged["id"].astype(str)
+    merged = merged.merge(archetypes[source_cols], on="__player_id", how="left")
+    matched = merged["dominant_archetype"].notna()
+    idx = merged["__row_index"]
+    out.loc[idx, score_cols] = 0.0
+    for code in K8_ARCHETYPE_LABELS:
+        out.loc[idx, f"score_{code.lower()}"] = pd.to_numeric(merged[code], errors="coerce").fillna(0.0).to_numpy() * 100.0
+    passthrough_cols = [
+        "dominant_archetype_code",
+        "dominant_archetype",
+        "top_1_code",
+        "top_1_archetype",
+        "top_1_pct",
+        "top_2_code",
+        "top_2_archetype",
+        "top_2_pct",
+        "top_3_code",
+        "top_3_archetype",
+        "top_3_pct",
+    ]
+    for col in passthrough_cols:
+        out.loc[idx, col] = merged[col].to_numpy()
+    out.loc[idx, "primary_archetype"] = merged["dominant_archetype"].fillna("Unassigned").to_numpy()
+    out.loc[idx, "primary_score"] = pd.to_numeric(merged["top_1_pct"], errors="coerce").fillna(0.0).to_numpy() * 100.0
+    out.loc[idx, "primary_score_col"] = merged["dominant_archetype_code"].str.lower().radd("score_").where(matched, "").to_numpy()
+    return out
 
 
 def read_yearly_sources(source_dir: Path) -> pd.DataFrame:
@@ -116,6 +190,7 @@ def main() -> None:
     parser.add_argument("--source-dir", default=str(DEFAULT_SOURCE_DIR))
     parser.add_argument("--processed-dir", default=str(DEFAULT_PROCESSED_DIR))
     parser.add_argument("--current-season", type=int, default=2026)
+    parser.add_argument("--k8-archetypes", default=str(DEFAULT_K8_ARCHETYPES_PATH))
     args = parser.parse_args()
 
     source_dir = Path(args.source_dir)
@@ -125,6 +200,7 @@ def main() -> None:
     raw = read_yearly_sources(source_dir)
     processed = build_dataset(raw)
     processed["season"] = pd.to_numeric(processed["season"], errors="coerce").astype("Int64")
+    processed = apply_k8_archetypes(processed, Path(args.k8_archetypes), args.current_season)
 
     current = processed[processed["season"].eq(args.current_season)].copy()
     historical = processed[processed["season"].lt(args.current_season)].copy()

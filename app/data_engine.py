@@ -35,9 +35,14 @@ POSITIONS = ["G", "G/F", "F", "F/C", "C"]
 CLASSES = ["R", "FR", "SO", "JR", "SR", "GR"]
 SIMILARITY_COLUMNS = [f"arch_pca_PC{i}" for i in range(1, 7)]
 ARCHETYPE_SCORE_COLUMNS = [
-    "score_pg_combo",
-    "score_wing_2_4",
-    "score_stretch_big",
+    "score_a0",
+    "score_a1",
+    "score_a2",
+    "score_a3",
+    "score_a4",
+    "score_a5",
+    "score_a6",
+    "score_a7",
 ]
 ARCHETYPE_METADATA_COLUMNS = [
     "primary_score_col",
@@ -47,9 +52,14 @@ ARCHETYPE_METADATA_COLUMNS = [
     "meets_big_preferred",
 ]
 ARCHETYPE_LABELS = {
-    "score_pg_combo": "PG / Combo Guard",
-    "score_wing_2_4": "2-4 Wing",
-    "score_stretch_big": "Stretch Big",
+    "score_a0": "Traditional Big",
+    "score_a1": "Midrange-Heavy Role Player",
+    "score_a2": "Two-Way Star Big",
+    "score_a3": "Three-Point Specialist",
+    "score_a4": "Combo Guard",
+    "score_a5": "Two-Way Star Guard",
+    "score_a6": "Low-Production Player",
+    "score_a7": "Efficient Off-Ball Finisher",
 }
 OPTIONAL_TAG_COLUMNS = [
     "transfer_available",
@@ -360,7 +370,9 @@ def _normalize_frame(raw: pd.DataFrame, id_prefix: str) -> pd.DataFrame:
     for i, col in enumerate(SIMILARITY_COLUMNS, start=1):
         df[col] = _numeric(raw, [col, f"PC{i}", f"arch_PC{i}"], default=0.0)
     for col in ARCHETYPE_SCORE_COLUMNS:
-        df[col] = _numeric(raw, [col], default=0.0)
+        code = col.replace("score_", "").upper()
+        df[col] = _numeric(raw, [col, code], default=0.0)
+        df[col] = df[col].where(df[col] > 1.0, df[col] * 100.0)
     df["primary_score_col"] = _text(raw, ["primary_score_col"], default="")
     df["primary_score"] = _numeric(raw, ["primary_score"], default=np.nan).fillna(df[ARCHETYPE_SCORE_COLUMNS].max(axis=1))
     df["meets_pg_preferred"] = _bool(raw, ["meets_pg_preferred"])

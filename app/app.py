@@ -74,14 +74,25 @@ RADAR_PALETTE = [
     "#8d7cc4",
 ]
 ARCHETYPE_SCORE_LABELS = {
-    "score_pg_combo": "PG / Combo Guard",
-    "score_wing_2_4": "2-4 Wing",
-    "score_stretch_big": "Stretch Big",
+    "score_a0": "Traditional Big",
+    "score_a1": "Midrange-Heavy Role Player",
+    "score_a2": "Two-Way Star Big",
+    "score_a3": "Three-Point Specialist",
+    "score_a4": "Combo Guard",
+    "score_a5": "Two-Way Star Guard",
+    "score_a6": "Low-Production Player",
+    "score_a7": "Efficient Off-Ball Finisher",
 }
 ARCHETYPE_COLOR = {
-    "PG / Combo Guard": "#4a9eed",
-    "2-4 Wing": "#5ab87a",
-    "Stretch Big": "#c8a84b",
+    "Traditional Big": "#9a7adc",
+    "Midrange-Heavy Role Player": "#d86f74",
+    "Two-Way Star Big": "#7cc47a",
+    "Three-Point Specialist": "#c8a84b",
+    "Combo Guard": "#4a9eed",
+    "Two-Way Star Guard": "#5ab87a",
+    "Low-Production Player": "#6f7f9f",
+    "Efficient Off-Ball Finisher": "#e8a44a",
+    "Unassigned": "#8d98ad",
 }
 ARCHETYPE_ORDER = list(ARCHETYPE_COLOR)
 TRITON_ZONE_METRICS = [
