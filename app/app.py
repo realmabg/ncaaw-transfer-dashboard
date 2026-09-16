@@ -2644,8 +2644,8 @@ def server(input, output, session):
         if origin == "historical_profile":
             ui.modal_show(
                 make_similarity_compare_modal(
-                    current_compare_profile_from_row(target_rows.iloc[0]),
                     historical_compare_profile_from_row(source_row),
+                    current_compare_profile_from_row(target_rows.iloc[0]),
                     comparison_origin="historical",
                     back_player_id=target_id,
                     inline_player_stats=True,
