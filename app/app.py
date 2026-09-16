@@ -1481,12 +1481,12 @@ def build_layout(plot_df, selected_id=None):
             **axis,
         ),
         yaxis=dict(
-            title="PC2 · support role ↔ usage/creation",
+            title="PC2 · support role ↓ · usage/creation ↑",
             title_font=tf,
             range=y_range,
             tickmode="array",
             tickvals=tickvals,
-            ticktext=[str(v) for v in y_ticks],
+            ticktext=[str(-v) for v in y_ticks],
             **axis,
         ),
         shapes=[
