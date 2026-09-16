@@ -35,6 +35,13 @@ HISTORICAL_PATH = (
     else HERE.parent / "data" / "processed" / "wbb_historical_player_index.csv"
 )
 HISTORICAL = pd.read_csv(HISTORICAL_PATH) if HISTORICAL_PATH.exists() else pd.DataFrame()
+K8_ARCHETYPE_PATH = (
+    HERE / "all-player-seasons-2021-2026-core-v1-k8-archetypes.csv"
+    if (HERE / "all-player-seasons-2021-2026-core-v1-k8-archetypes.csv").exists()
+    else HERE.parent / "all-player-seasons-2021-2026-core-v1-k8-archetypes.csv"
+)
+K8_ARCHETYPES = pd.read_csv(K8_ARCHETYPE_PATH) if K8_ARCHETYPE_PATH.exists() else pd.DataFrame()
+LEGACY_ARCHETYPE_LABELS = {"PG / Combo Guard", "2-4 Wing", "Stretch Big"}
 HISTORICAL_TABLE_LIMIT = 25
 HISTORICAL_CURRENT_LIMIT = 8
 HISTORICAL_TRACKER_COMP_LIMIT = 5
@@ -246,6 +253,74 @@ def historical_big_west_next_year_ids() -> set[str]:
     return set(matched["season_player_id"].dropna().astype(str))
 
 
+def historical_player_id(row) -> str:
+    if row is None:
+        return ""
+    player_id = str(row.get("player_id", "") or "").strip()
+    if player_id and player_id.lower() != "nan":
+        return player_id
+    season_player_id = str(row.get("season_player_id", "") or "").strip()
+    if "_" in season_player_id:
+        return season_player_id.rsplit("_", 1)[-1].strip()
+    return ""
+
+
+def _startup_float(value, default=np.nan):
+    num = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+    return float(num) if pd.notna(num) else default
+
+
+def historical_season(row):
+    season = _startup_float(row.get("season", row.get("year", np.nan)), np.nan) if row is not None else np.nan
+    return int(season) if np.isfinite(season) else None
+
+
+def build_k8_archetype_lookup() -> dict[tuple[int, str], str]:
+    if K8_ARCHETYPES.empty:
+        return {}
+    season_col = "season" if "season" in K8_ARCHETYPES.columns else "year"
+    label_col = next((col for col in ["dominant_archetype", "top_1_archetype", "primary_archetype", "archetype"] if col in K8_ARCHETYPES.columns), None)
+    if season_col not in K8_ARCHETYPES.columns or "player_id" not in K8_ARCHETYPES.columns or not label_col:
+        return {}
+    lookup = {}
+    for _, k8_row in K8_ARCHETYPES.iterrows():
+        season = _startup_float(k8_row.get(season_col), np.nan)
+        player_id = str(k8_row.get("player_id", "") or "").strip()
+        label = str(k8_row.get(label_col, "") or "").strip()
+        if np.isfinite(season) and player_id and label and label.lower() != "nan":
+            lookup[(int(season), player_id)] = label
+    return lookup
+
+
+K8_ARCHETYPE_LOOKUP = build_k8_archetype_lookup()
+
+
+def historical_display_archetype(row) -> str:
+    if row is None:
+        return ""
+    season = historical_season(row)
+    player_id = historical_player_id(row)
+    if season is not None and player_id:
+        label = K8_ARCHETYPE_LOOKUP.get((season, player_id), "")
+        if label:
+            return label
+    for col in ["dominant_archetype", "top_1_archetype", "primary_archetype"]:
+        label = str(row.get(col, "") or "").strip()
+        if label and label.lower() != "nan":
+            return label
+    label = str(row.get("archetype", "") or "").strip()
+    return "" if label in LEGACY_ARCHETYPE_LABELS else label
+
+
+def apply_historical_k8_archetypes(frame):
+    if frame.empty or "archetype" not in frame.columns:
+        return frame
+    out = frame.copy()
+    out["archetype"] = out.apply(historical_display_archetype, axis=1)
+    return out
+
+
+HISTORICAL = apply_historical_k8_archetypes(HISTORICAL)
 HISTORICAL_BIG_WEST_NEXT_YEAR_IDS = historical_big_west_next_year_ids()
 
 
@@ -633,7 +708,7 @@ def historical_profile_subtitle(row):
         str(row.get("team", "")).strip(),
         str(int(_as_float(row.get("year"), 0))) if np.isfinite(_as_float(row.get("year"), np.nan)) else "",
         str(row.get("pos", "")).strip(),
-        str(row.get("archetype", "")).strip(),
+        historical_display_archetype(row),
     ]
     return " · ".join([part for part in parts if part])
 
