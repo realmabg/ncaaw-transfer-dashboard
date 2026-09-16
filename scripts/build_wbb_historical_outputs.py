@@ -10,7 +10,7 @@ from build_wbb_d1_dataset import build_dataset
 
 DEFAULT_SOURCE_DIR = Path("womens_player_pbp_and_regular_stats_2021_2026")
 DEFAULT_PROCESSED_DIR = Path("data/processed")
-DEFAULT_K8_ARCHETYPES_PATH = Path("all-players-2025-26-core-v1-k8-archetypes copy.csv")
+DEFAULT_K8_ARCHETYPES_PATH = Path("all-player-seasons-2021-2026-core-v1-k8-archetypes.csv")
 
 
 K8_ARCHETYPE_LABELS = {
@@ -25,60 +25,67 @@ K8_ARCHETYPE_LABELS = {
 }
 
 
-def apply_k8_archetypes(processed: pd.DataFrame, archetype_path: Path, current_season: int) -> pd.DataFrame:
+LEGACY_ARCHETYPE_COLUMNS = [
+    "score_pg_combo",
+    "score_wing_2_4",
+    "score_stretch_big",
+    "qual_pg_reason",
+    "qual_wing_reason",
+    "qual_big_reason",
+]
+
+
+def apply_k8_archetypes(processed: pd.DataFrame, archetype_path: Path, current_season: int | None = None) -> pd.DataFrame:
     out = processed.copy()
     score_cols = [f"score_{code.lower()}" for code in K8_ARCHETYPE_LABELS]
-    for col in [*score_cols, "dominant_archetype_code", "dominant_archetype", "top_1_code", "top_1_archetype", "top_1_pct", "top_2_code", "top_2_archetype", "top_2_pct", "top_3_code", "top_3_archetype", "top_3_pct"]:
+    metadata_cols = [
+        "dominant_archetype_code",
+        "dominant_archetype",
+        "top_1_code",
+        "top_1_archetype",
+        "top_1_pct",
+        "top_2_code",
+        "top_2_archetype",
+        "top_2_pct",
+        "top_3_code",
+        "top_3_archetype",
+        "top_3_pct",
+    ]
+    for col in [*score_cols, *metadata_cols]:
         if col not in out.columns:
             out[col] = pd.NA
-    current_mask = pd.to_numeric(out["season"], errors="coerce").eq(current_season)
+
     if not archetype_path.exists():
-        out.loc[current_mask, score_cols] = 0.0
-        out.loc[current_mask, "primary_archetype"] = "Unassigned"
-        out.loc[current_mask, "primary_score"] = 0.0
-        out.loc[current_mask, "primary_score_col"] = ""
+        target_mask = pd.Series(True, index=out.index)
+        if current_season is not None:
+            target_mask = pd.to_numeric(out["season"], errors="coerce").eq(current_season)
+        out.loc[target_mask, score_cols] = 0.0
+        out.loc[target_mask, "primary_archetype"] = "Unassigned"
+        out.loc[target_mask, "primary_score"] = 0.0
+        out.loc[target_mask, "primary_score_col"] = ""
         return out
 
     archetypes = pd.read_csv(archetype_path)
     archetypes["__player_id"] = archetypes["player_id"].astype(str)
+    archetypes["__season"] = pd.to_numeric(archetypes["season"], errors="coerce").astype("Int64")
     source_cols = [
+        "__season",
         "__player_id",
-        "dominant_archetype_code",
-        "dominant_archetype",
-        "top_1_code",
-        "top_1_archetype",
-        "top_1_pct",
-        "top_2_code",
-        "top_2_archetype",
-        "top_2_pct",
-        "top_3_code",
-        "top_3_archetype",
-        "top_3_pct",
+        *metadata_cols,
         *K8_ARCHETYPE_LABELS.keys(),
     ]
-    merged = out.loc[current_mask, ["id"]].copy()
-    merged["__row_index"] = merged.index
-    merged["__player_id"] = merged["id"].astype(str)
-    merged = merged.merge(archetypes[source_cols], on="__player_id", how="left")
+    target = out[["season", "id"]].copy()
+    target["__row_index"] = target.index
+    target["__season"] = pd.to_numeric(target["season"], errors="coerce").astype("Int64")
+    target["__player_id"] = target["id"].astype(str)
+    merged = target.merge(archetypes[source_cols], on=["__season", "__player_id"], how="left")
     matched = merged["dominant_archetype"].notna()
     idx = merged["__row_index"]
+
     out.loc[idx, score_cols] = 0.0
     for code in K8_ARCHETYPE_LABELS:
         out.loc[idx, f"score_{code.lower()}"] = pd.to_numeric(merged[code], errors="coerce").fillna(0.0).to_numpy() * 100.0
-    passthrough_cols = [
-        "dominant_archetype_code",
-        "dominant_archetype",
-        "top_1_code",
-        "top_1_archetype",
-        "top_1_pct",
-        "top_2_code",
-        "top_2_archetype",
-        "top_2_pct",
-        "top_3_code",
-        "top_3_archetype",
-        "top_3_pct",
-    ]
-    for col in passthrough_cols:
+    for col in metadata_cols:
         out.loc[idx, col] = merged[col].to_numpy()
     out.loc[idx, "primary_archetype"] = merged["dominant_archetype"].fillna("Unassigned").to_numpy()
     out.loc[idx, "primary_score"] = pd.to_numeric(merged["top_1_pct"], errors="coerce").fillna(0.0).to_numpy() * 100.0
@@ -169,10 +176,26 @@ def historical_columns(frame: pd.DataFrame) -> pd.DataFrame:
         "mid_assisted_pct",
         "three_assisted_pct",
         "stops_per_40",
-        "score_pg_combo",
-        "score_wing_2_4",
-        "score_stretch_big",
+        "score_a0",
+        "score_a1",
+        "score_a2",
+        "score_a3",
+        "score_a4",
+        "score_a5",
+        "score_a6",
+        "score_a7",
         "primary_score",
+        "dominant_archetype_code",
+        "dominant_archetype",
+        "top_1_code",
+        "top_1_archetype",
+        "top_1_pct",
+        "top_2_code",
+        "top_2_archetype",
+        "top_2_pct",
+        "top_3_code",
+        "top_3_archetype",
+        "top_3_pct",
     ]
     out = frame.rename(columns=rename).copy()
     out["year"] = pd.to_numeric(out["season"], errors="coerce").astype("Int64")
@@ -201,6 +224,7 @@ def main() -> None:
     processed = build_dataset(raw)
     processed["season"] = pd.to_numeric(processed["season"], errors="coerce").astype("Int64")
     processed = apply_k8_archetypes(processed, Path(args.k8_archetypes), args.current_season)
+    processed = processed.drop(columns=LEGACY_ARCHETYPE_COLUMNS, errors="ignore")
 
     current = processed[processed["season"].eq(args.current_season)].copy()
     historical = processed[processed["season"].lt(args.current_season)].copy()

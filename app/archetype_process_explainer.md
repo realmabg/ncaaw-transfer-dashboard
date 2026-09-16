@@ -21,13 +21,13 @@ The player profile shows all eight membership scores. The highlighted archetype 
 
 Current-season archetypes come from:
 
-`all-players-2025-26-core-v1-k8-archetypes copy.csv`
+`all-player-seasons-2021-2026-core-v1-k8-archetypes.csv`
 
-That file is scored from the frozen K8 model and covers the full 2025-26 current-player dashboard pool. It was compared against the existing 3,572-player K8 export; all overlapping players matched the provided dominant archetype, with only tiny rounding differences in membership weights.
+That file is scored from the frozen K8 model and covers every 2021-26 player-season used by the dashboard. Its 2026 rows were compared against the existing 3,572-player K8 export; all overlapping players matched the provided dominant archetype, with only tiny rounding differences in membership weights.
 
 ## Historical Players
 
-The frozen K8 scoring file covers the 2025-26 current player pool. Historical comparison records keep their existing historical labels and comparison data. The K8 labels are used for current-player profile cards, filters, current-player lists, and current-player archetype score bars.
+The frozen K8 scoring file covers the 2021-26 historical and current player pools. The K8 labels are used for current-player profile cards, filters, current-player lists, historical-player filters, historical comparison cards, and archetype score bars.
 
 ## Triton Zone Thresholds
 
