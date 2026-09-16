@@ -2183,7 +2183,7 @@ html, body {
   width:100% !important;
   margin:0 !important;
 }
-.triton-threshold-field input[type="number"],
+.triton-threshold-field input[type="text"],
 .triton-threshold-field .form-control {
   width:100% !important;
   min-height:38px;
@@ -2228,13 +2228,13 @@ html, body {
 @media (max-width: 1050px) {
   .triton-criteria-grid { grid-template-columns:1fr; }
 }
-.triton-war-track {
+.triton-score-track {
   margin-top:4px;
   height:4px;
   width:84px;
   background:var(--rule-2);
 }
-.triton-war-fill {
+.triton-score-fill {
   height:100%;
   background:var(--accent);
 }

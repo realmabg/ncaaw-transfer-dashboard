@@ -469,7 +469,7 @@ def build_triton_frame(frame, zone_targets=None, archetype_targets=None):
     out["triton_checks_passed"] = checks
     out["triton_checks_total"] = len(TRITON_ZONE_METRICS)
     out["triton_zone"] = zone
-    out["triton_war"] = (weighted / total_weight).clip(0, 100)
+    out["triton_score"] = (weighted / total_weight).clip(0, 100)
     for key, meta in TRITON_SPECIAL_ARCHETYPES.items():
         meets = pd.Series(True, index=out.index)
         for criterion in meta["criteria"]:
@@ -505,13 +505,10 @@ def triton_target_control(input_id, meta):
             ui.span(meta.get("long", ""), class_="triton-threshold-hint"),
             class_="triton-threshold-head",
         ),
-        ui.input_numeric(
+        ui.input_text(
             input_id,
             None,
-            value=meta["target"],
-            min=48 if is_height else 0,
-            max=84 if is_height else 100,
-            step=1,
+            value=f"{meta['target']:.0f}",
             width="100%",
         ),
         ui.div("inches" if is_height else "percent", class_="triton-threshold-unit"),
@@ -1793,7 +1790,7 @@ def make_detail_modal(player_id, frame, league_avg_map, similar_fn, watchlist, s
             ui.div(ui.span({"class": "team-dot", "style": f"background:{pc}"}), f"{row['team']} · {row['confName']}", class_="player-team"),
             ui.div({"class": "bio-grid"}, bio_item("Division", "WBB D-I"), bio_item("Position", position_label(row["pos"])), bio_item("Archetype", row["primary_archetype"]), bio_item("Class", row["cls"]), bio_item("Eligibility Used", str(int(row["eligibility"])), mono=True), bio_item("Height", height_str(int(row["heightIn"])), mono=True), bio_item("Games", str(int(row["gp"])), mono=True), bio_item("Min/G", f"{row['mpg']:.1f}", mono=True), bio_item("BPM", f"{bpm_value:.1f}" if pd.notna(bpm_value) else "N/A", mono=True), bio_item("PORPAG", f"{porpag_value:.2f}" if pd.notna(porpag_value) else "N/A", mono=True)),
             ui.div(ui.div("Archetype", class_="col-title"), *archetype_score_rows(row), class_="arch-score-panel"),
-            ui.div(ui.div("Triton Zone", ui.span(f"{row.get('triton_checks_passed', 0)}/{len(TRITON_ZONE_METRICS)} checks · {row.get('triton_war', 0):.0f} WAR", class_="sub"), class_="col-title"), ui.div({"class": "triton-mini"}, *triton_rows), class_="arch-score-panel"),
+            ui.div(ui.div("Triton Zone", ui.span(f"{row.get('triton_checks_passed', 0)}/{len(TRITON_ZONE_METRICS)} checks · {row.get('triton_score', 0):.0f} score", class_="sub"), class_="col-title"), ui.div({"class": "triton-mini"}, *triton_rows), class_="arch-score-panel"),
         ),
         ui.div(
             {"class": "detail-col"},
@@ -1967,7 +1964,7 @@ def make_triton_tab():
                 ui.tags.details(
                     {"class": "triton-more triton-thresholds-panel", "open": "open"},
                     ui.tags.summary("Triton Zone thresholds"),
-                    ui.div("Adjust the cutoffs below to recalculate Triton WAR, zone checks, and archetype tags.", class_="triton-more-note"),
+                    ui.div("Adjust the cutoffs below to recalculate Triton Score, zone checks, and archetype tags.", class_="triton-more-note"),
                     ui.div(
                         {"class": "triton-threshold-card"},
                         ui.div("Zone checks", class_="triton-threshold-card-title"),
@@ -2846,7 +2843,7 @@ def server(input, output, session):
             d = d[d[f"triton_is_{arch}"]]
             if bool(input.triton_require_zone()):
                 d = d[d["triton_zone"]]
-        return d.sort_values(["triton_war", "bpm"], ascending=[False, False])
+        return d.sort_values(["triton_score", "bpm"], ascending=[False, False])
 
     @reactive.calc
     def d1_plot_df():
@@ -2955,7 +2952,7 @@ def server(input, output, session):
                 )
                 for m in TRITON_ZONE_METRICS
             ]
-            war = max(0, min(100, _as_float(row.get("triton_war"), 0)))
+            triton_score = max(0, min(100, _as_float(row.get("triton_score"), 0)))
             checks_passed = int(row["triton_checks_passed"])
             arch_tags = []
             for arch_key, arch_meta in TRITON_SPECIAL_ARCHETYPES.items():
@@ -2969,13 +2966,13 @@ def server(input, output, session):
                     ui.tags.td(row.get("confName", "")),
                     ui.tags.td(height_str(_as_float(row.get("heightIn"), 0))),
                     ui.tags.td(f"{_as_float(row.get('mpg'), 0):.1f}"),
-                    ui.tags.td(ui.div(f"{war:.0f}", class_="triton-war-value"), ui.div({"class": "triton-war-track"}, ui.div({"class": "triton-war-fill", "style": f"width:{war:.1f}%"}))),
+                    ui.tags.td(ui.div(f"{triton_score:.0f}", class_="triton-score-value"), ui.div({"class": "triton-score-track"}, ui.div({"class": "triton-score-fill", "style": f"width:{triton_score:.1f}%"}))),
                     ui.tags.td(ui.span(f"{checks_passed}/{len(TRITON_ZONE_METRICS)}", class_=f"triton-zone-badge {'is-full' if checks_passed >= len(TRITON_ZONE_METRICS) else ''}")),
                     *cells,
                     ui.tags.td(ui.div({"class": "triton-arch-tags"}, *(arch_tags or [ui.span("-", class_="triton-arch-tag is-empty")]))),
                 )
             )
-        headers = ["#", "Player", "Conference", "Ht", "MPG", "Triton Zone ↓", "Zone", *[m["label"] for m in TRITON_ZONE_METRICS], "Archetype"]
+        headers = ["#", "Player", "Conference", "Ht", "MPG", "Triton Score ↓", "Zone", *[m["label"] for m in TRITON_ZONE_METRICS], "Archetype"]
         return ui.div({"class": "triton-table-card"}, ui.tags.table({"class": "triton-table"}, ui.tags.thead(ui.tags.tr(*[ui.tags.th(x) for x in headers])), ui.tags.tbody(*body)))
 
     @output
@@ -2990,13 +2987,13 @@ def server(input, output, session):
         if not rows:
             return ui.div("Add current players to the watchlist to sketch lineup combinations against the UCSD roster reference.", class_="historical-empty")
         pool = pd.DataFrame(rows)
-        pool = pool.assign(lineup_score=pool["triton_war"].fillna(0) + pool["bpm"].fillna(0) * 2 + pool["primary_score"].fillna(0) * .25)
+        pool = pool.assign(lineup_score=pool["triton_score"].fillna(0) + pool["bpm"].fillna(0) * 2 + pool["primary_score"].fillna(0) * .25)
         guards = pool[pool["pos"].isin(["G", "G/F"])].sort_values("lineup_score", ascending=False).head(2)
         wings = pool[pool["pos"].isin(["G/F", "F"])].drop(guards.index, errors="ignore").sort_values("lineup_score", ascending=False).head(2)
         bigs = pool[pool["pos"].isin(["F/C", "C"])].drop(guards.index.union(wings.index), errors="ignore").sort_values("lineup_score", ascending=False).head(1)
         chosen = pd.concat([guards, wings, bigs]).drop_duplicates(subset=["id"]).head(5)
         cards = [
-            ui.div({"class": "lineup-card"}, ui.div(row["name"], class_="comp-name"), ui.div(f"{row['team']} · {row['pos']} · {row['primary_archetype']}", class_="table-meta"), ui.div(f"Triton WAR {row['triton_war']:.0f} · BPM {row['bpm']:.1f}", class_="table-meta"))
+            ui.div({"class": "lineup-card"}, ui.div(row["name"], class_="comp-name"), ui.div(f"{row['team']} · {row['pos']} · {row['primary_archetype']}", class_="table-meta"), ui.div(f"Triton Score {row['triton_score']:.0f} · BPM {row['bpm']:.1f}", class_="table-meta"))
             for _, row in chosen.iterrows()
         ]
         return ui.div(ui.div({"class": "lineup-grid"}, *cards), ui.div(f"Roster reference: {UCSD_WBB_ROSTER_URL}", class_="beta-note"))
