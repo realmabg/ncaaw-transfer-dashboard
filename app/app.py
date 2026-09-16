@@ -685,7 +685,14 @@ def make_similarity_input_sections(profile):
     return sections
 
 
-def make_similarity_compare_modal(source_profile, target_profile, comparison_origin="historical", extra_profiles=None):
+def make_similarity_compare_modal(
+    source_profile,
+    target_profile,
+    comparison_origin="historical",
+    extra_profiles=None,
+    back_player_id=None,
+    inline_player_stats=False,
+):
     profiles = [source_profile, target_profile, *(extra_profiles or [])]
     grid_cols = f"minmax(0, 1.2fr) {' '.join(['minmax(0, 1fr)' for _ in profiles])}"
     sections = []
@@ -722,9 +729,9 @@ def make_similarity_compare_modal(source_profile, target_profile, comparison_ori
         else ui.div()
     )
 
-    source_id = str(source_profile.get("player_id", "") or "")
+    source_id = str(back_player_id if back_player_id is not None else source_profile.get("player_id", "") or "")
     footer_buttons = []
-    if source_id:
+    if source_id and not inline_player_stats:
         footer_buttons.append(
             ui.tags.button(
                 {
@@ -737,7 +744,13 @@ def make_similarity_compare_modal(source_profile, target_profile, comparison_ori
                 "Back to player",
             )
         )
-    title_note = "Current comps profile view" if comparison_origin == "current" else "Historical comps profile view"
+    title_note = (
+        "Current comps profile view"
+        if comparison_origin == "current"
+        else "Triton Tracker profile view"
+        if comparison_origin == "tracker"
+        else "Historical comps profile view"
+    )
     body = ui.div(
         {"id": "compare-detail-body"},
         ui.tags.script(
@@ -770,6 +783,20 @@ def make_similarity_compare_modal(source_profile, target_profile, comparison_ori
                 ui.div(
                     ui.div(
                         ui.div(profile["player_name"], class_="compare-player-name"),
+                        (
+                            ui.tags.button(
+                                {
+                                    "class": "compare-player-stats-btn",
+                                    "onclick": (
+                                        "window.__compareModalNavigating = true;"
+                                        f"Shiny.setInputValue('modal_compare_back',{json.dumps(source_id)},{{priority:'event'}})"
+                                    ),
+                                },
+                                "Player's stats",
+                            )
+                            if inline_player_stats and source_id and str(profile.get("player_id", "") or "") == source_id
+                            else ui.div()
+                        ),
                         class_="compare-player-head",
                     ),
                     ui.div(profile.get("subtitle", ""), class_="compare-player-sub"),
@@ -822,7 +849,7 @@ def tracker_comp_rows(row, comps, board_index=0):
     rows = []
     source_id = str(row.get("season_player_id", "") or "")
     for comp in comps:
-        payload = {"source_id": source_id, "target_id": str(comp.get("id", "") or "")}
+        payload = {"source_id": source_id, "target_id": str(comp.get("id", "") or ""), "origin": "tracker"}
         rows.append(
             ui.div(
                 {
@@ -2573,6 +2600,18 @@ def server(input, output, session):
         source_row = historical_row_by_id(source_id)
         target_rows = df[df["id"].astype(str).eq(target_id)]
         if source_row is None or target_rows.empty:
+            return
+        origin = str(payload.get("origin", "") or "").strip()
+        if origin == "tracker":
+            ui.modal_show(
+                make_similarity_compare_modal(
+                    historical_compare_profile_from_row(source_row),
+                    current_compare_profile_from_row(target_rows.iloc[0]),
+                    comparison_origin="tracker",
+                    back_player_id=target_id,
+                    inline_player_stats=True,
+                )
+            )
             return
         extra_profiles = []
         if modal_historical_next_scope.get() == "big_west_next":

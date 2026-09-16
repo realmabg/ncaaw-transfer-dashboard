@@ -1626,6 +1626,25 @@ html, body {
   color:var(--ink-3);
   font-size:12px;
 }
+
+.compare-player-stats-btn {
+  flex:0 0 auto;
+  border:1px solid rgba(240,203,103,.55);
+  background:var(--accent);
+  color:#0f1623;
+  border-radius:999px;
+  padding:8px 13px;
+  font-family:var(--mono);
+  font-size:10px;
+  font-weight:800;
+  letter-spacing:.10em;
+  text-transform:uppercase;
+  cursor:pointer;
+  white-space:nowrap;
+}
+.compare-player-stats-btn:hover {
+  filter:brightness(1.05);
+}
 .compare-stat-head,
 .compare-stat-row {
   display:grid;
