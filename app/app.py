@@ -2602,7 +2602,8 @@ def server(input, output, session):
         if source_row is None or target_rows.empty:
             return
         origin = str(payload.get("origin", "") or "").strip()
-        if origin == "tracker":
+        tracker_style = origin == "tracker" or target_id == str(modal_player.get() or "")
+        if tracker_style:
             ui.modal_show(
                 make_similarity_compare_modal(
                     historical_compare_profile_from_row(source_row),
