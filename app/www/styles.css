@@ -2105,8 +2105,8 @@ html, body {
   color:var(--accent);
   font-family:var(--sans);
   font-size:11px;
-  font-weight:700;
-  letter-spacing:.10em;
+  font-weight:800;
+  letter-spacing:.12em;
   text-transform:uppercase;
   list-style:none;
 }
@@ -2120,32 +2120,102 @@ html, body {
 .triton-more-note {
   color:var(--ink-3);
   font-size:12px;
-  line-height:1.55;
+  line-height:1.45;
   margin:10px 0 14px;
-  max-width:820px;
+  max-width:900px;
+}
+.triton-thresholds-panel {
+  padding-bottom:12px;
+}
+.triton-threshold-card {
+  border:1px solid rgba(89,113,154,.34);
+  background:rgba(10,16,27,.38);
+  padding:14px;
+  margin-top:12px;
+}
+.triton-threshold-card-title,
+.triton-more-subhead {
+  color:var(--ink-2);
+  font-family:var(--mono);
+  font-size:11px;
+  font-weight:800;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+}
+.triton-more-subhead {
+  margin-top:16px;
+}
+.triton-criteria-grid {
+  display:grid;
+  grid-template-columns:repeat(2, minmax(0, 1fr));
+  gap:12px;
 }
 .triton-threshold-grid {
   display:grid;
-  grid-template-columns:repeat(auto-fill, minmax(170px, 1fr));
-  gap:14px 20px;
+  grid-template-columns:repeat(auto-fit, minmax(150px, 1fr));
+  gap:12px;
+  margin-top:10px;
+}
+.triton-threshold-grid--compact {
+  grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));
+}
+.triton-threshold-field {
+  min-width:0;
 }
 .triton-threshold-head {
   display:flex;
-  align-items:baseline;
-  align-content:flex-start;
-  gap:8px;
+  flex-direction:column;
+  gap:2px;
   margin-bottom:6px;
-  flex-wrap:wrap;
 }
 .triton-threshold-name {
   color:var(--ink);
   font-family:var(--mono);
   font-size:12px;
-  font-weight:500;
+  font-weight:800;
 }
 .triton-threshold-hint {
   color:var(--ink-3);
   font-size:11px;
+  line-height:1.35;
+}
+.triton-threshold-field .shiny-input-container {
+  width:100% !important;
+  margin:0 !important;
+}
+.triton-threshold-field input[type="number"],
+.triton-threshold-field .form-control {
+  width:100% !important;
+  min-height:38px;
+  border:1px solid var(--rule-2) !important;
+  border-radius:0 !important;
+  background:rgba(7,12,22,.72) !important;
+  color:var(--accent) !important;
+  box-shadow:none !important;
+  font-family:var(--mono) !important;
+  font-size:14px !important;
+  font-weight:700 !important;
+  padding:8px 10px !important;
+}
+.triton-threshold-unit {
+  margin-top:4px;
+  color:var(--ink-3);
+  font-family:var(--mono);
+  font-size:9px;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+}
+.triton-more-archhead {
+  display:flex;
+  align-items:baseline;
+  gap:8px;
+  flex-wrap:wrap;
+}
+.triton-more-arch {
+  color:var(--ink);
+  font-family:var(--serif);
+  font-size:20px;
+  line-height:1.1;
 }
 .triton-threshold-static {
   border:1px solid var(--rule-2);
@@ -2154,6 +2224,9 @@ html, body {
   font-family:var(--mono);
   font-size:13px;
   padding:7px 9px;
+}
+@media (max-width: 1050px) {
+  .triton-criteria-grid { grid-template-columns:1fr; }
 }
 .triton-war-track {
   margin-top:4px;

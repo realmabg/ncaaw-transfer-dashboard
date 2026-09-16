@@ -440,7 +440,9 @@ def metric_values(frame, metric):
     return pd.to_numeric(frame.get(metric["col"], pd.Series(np.nan, index=frame.index)), errors="coerce") * metric["scale"]
 
 
-def build_triton_frame(frame):
+def build_triton_frame(frame, zone_targets=None, archetype_targets=None):
+    zone_targets = zone_targets or {}
+    archetype_targets = archetype_targets or {}
     out = frame.copy()
     weighted = pd.Series(0.0, index=out.index)
     total_weight = sum(metric["weight"] for metric in TRITON_ZONE_METRICS)
@@ -448,7 +450,7 @@ def build_triton_frame(frame):
     zone = pd.Series(True, index=out.index)
     for metric in TRITON_ZONE_METRICS:
         values = metric_values(out, metric)
-        target = metric["target"]
+        target = _as_float(zone_targets.get(metric["key"], metric["target"]), metric["target"])
         ok = values >= target if metric["higher_is_better"] else values <= target
         ok = ok.fillna(False)
         clean = values.dropna()
@@ -472,7 +474,7 @@ def build_triton_frame(frame):
         meets = pd.Series(True, index=out.index)
         for criterion in meta["criteria"]:
             values = metric_values(out, criterion)
-            target = criterion["target"]
+            target = _as_float(archetype_targets.get(criterion["key"], criterion["target"]), criterion["target"])
             ok = values >= target if criterion["higher_is_better"] else values <= target
             meets &= ok.fillna(False)
         out[f"triton_is_{key}"] = meets
@@ -480,6 +482,40 @@ def build_triton_frame(frame):
 
 
 df = build_triton_frame(df)
+
+
+def triton_target_input_id(metric):
+    return f"triton_target_{metric['key']}"
+
+
+def triton_arch_target_input_id(criterion):
+    return f"triton_arch_target_{criterion['key']}"
+
+
+def triton_target_label(meta):
+    return height_str(meta["target"]) if meta.get("kind") == "height" else f"{meta['target']:.0f}%"
+
+
+def triton_target_control(input_id, meta):
+    is_height = meta.get("kind") == "height"
+    return ui.div(
+        {"class": "triton-threshold-field"},
+        ui.div(
+            ui.span(meta["label"], class_="triton-threshold-name"),
+            ui.span(meta.get("long", ""), class_="triton-threshold-hint"),
+            class_="triton-threshold-head",
+        ),
+        ui.input_numeric(
+            input_id,
+            None,
+            value=meta["target"],
+            min=48 if is_height else 0,
+            max=84 if is_height else 100,
+            step=1,
+            width="100%",
+        ),
+        ui.div("inches" if is_height else "percent", class_="triton-threshold-unit"),
+    )
 
 
 def historical_slider_range(column, step=1.0, fallback=(0, 1)):
@@ -1929,41 +1965,36 @@ def make_triton_tab():
                     ui.div({"class": "triton-filter-field"}, ui.div("Board length", class_="triton-filter-title"), ui.input_select("triton_limit", None, choices=TRITON_TABLE_LIMITS, selected="100")),
                 ),
                 ui.tags.details(
-                    {"class": "triton-more"},
+                    {"class": "triton-more triton-thresholds-panel", "open": "open"},
                     ui.tags.summary("Triton Zone thresholds"),
-                    ui.div("The current fixed targets match the men’s dashboard target set.", class_="triton-more-note"),
+                    ui.div("Adjust the cutoffs below to recalculate Triton WAR, zone checks, and archetype tags.", class_="triton-more-note"),
                     ui.div(
-                        {"class": "triton-threshold-grid"},
-                        *[
-                            ui.div(
-                                {"class": "triton-threshold-field"},
-                                ui.div(ui.span(metric["label"], class_="triton-threshold-name"), ui.span(metric["long"], class_="triton-threshold-hint"), class_="triton-threshold-head"),
-                                ui.div(f"{metric['target']:.0f}{'%' if metric['col'] != 'heightIn' else ''}", class_="triton-threshold-static"),
-                            )
-                            for metric in TRITON_ZONE_METRICS
-                        ],
+                        {"class": "triton-threshold-card"},
+                        ui.div("Zone checks", class_="triton-threshold-card-title"),
+                        ui.div(
+                            {"class": "triton-threshold-grid"},
+                            *[triton_target_control(triton_target_input_id(metric), metric) for metric in TRITON_ZONE_METRICS],
+                        ),
                     ),
                     ui.div("Archetype criteria", class_="triton-more-subhead"),
-                    *[
-                        ui.div(
-                            ui.div(ui.span(archetype["label"], class_="triton-more-arch"), ui.span(archetype["note"], class_="triton-threshold-hint"), class_="triton-more-archhead"),
+                    ui.div(
+                        {"class": "triton-criteria-grid"},
+                        *[
                             ui.div(
-                                {"class": "triton-threshold-grid"},
-                                *[
-                                    ui.div(
-                                        {"class": "triton-threshold-field"},
-                                        ui.div(ui.span(criterion["label"], class_="triton-threshold-name"), class_="triton-threshold-head"),
-                                        ui.div(
-                                            height_str(criterion["target"]) if criterion.get("kind") == "height" else f"{criterion['target']:.0f}%",
-                                            class_="triton-threshold-static",
-                                        ),
-                                    )
-                                    for criterion in archetype["criteria"]
-                                ],
-                            ),
-                        )
-                        for archetype in TRITON_SPECIAL_ARCHETYPES.values()
-                    ],
+                                {"class": "triton-threshold-card"},
+                                ui.div(
+                                    ui.span(archetype["label"], class_="triton-more-arch"),
+                                    ui.span(archetype["note"], class_="triton-threshold-hint"),
+                                    class_="triton-more-archhead",
+                                ),
+                                ui.div(
+                                    {"class": "triton-threshold-grid triton-threshold-grid--compact"},
+                                    *[triton_target_control(triton_arch_target_input_id(criterion), criterion) for criterion in archetype["criteria"]],
+                                ),
+                            )
+                            for archetype in TRITON_SPECIAL_ARCHETYPES.values()
+                        ],
+                    ),
                 ),
                 ui.tags.details(
                     {"class": "triton-more"},
@@ -2421,7 +2452,7 @@ def server(input, output, session):
         if row.empty:
             return
         modal_player.set(pid)
-        ui.modal_show(make_detail_modal(pid, df, league_avg, similar_to_fn, watchlist.get(), modal_similarity_metric.get(), modal_similarity_view.get(), modal_historical_next_scope.get()))
+        ui.modal_show(make_detail_modal(pid, triton_scored(), league_avg, similar_to_fn, watchlist.get(), modal_similarity_metric.get(), modal_similarity_view.get(), modal_historical_next_scope.get()))
 
     @reactive.effect
     @reactive.event(input.modal_similarity_metric)
@@ -2775,8 +2806,21 @@ def server(input, output, session):
         return d.sort_values(["year", "bpm", "mins_per_game"], ascending=[False, False, False]).head(HISTORICAL_TABLE_LIMIT)
 
     @reactive.calc
+    def triton_scored():
+        zone_targets = {}
+        for metric in TRITON_ZONE_METRICS:
+            control = getattr(input, triton_target_input_id(metric))
+            zone_targets[metric["key"]] = _as_float(control(), metric["target"])
+        archetype_targets = {}
+        for archetype in TRITON_SPECIAL_ARCHETYPES.values():
+            for criterion in archetype["criteria"]:
+                control = getattr(input, triton_arch_target_input_id(criterion))
+                archetype_targets[criterion["key"]] = _as_float(control(), criterion["target"])
+        return build_triton_frame(df, zone_targets=zone_targets, archetype_targets=archetype_targets)
+
+    @reactive.calc
     def triton_filtered():
-        d = df.copy()
+        d = triton_scored().copy()
         q = (input.triton_q() or "").strip().lower()
         if q:
             d = d[d["name"].str.lower().str.contains(q, na=False)]
