@@ -2062,6 +2062,16 @@ app_ui = ui.page_fluid(
                 graph.dataset.codexPlotlyClickBound = '1';
             }
 
+            function isTritonThresholdInput(el) {
+                return !!(el && el.matches && el.matches('.triton-threshold-field input, input[id^="triton_target_"], input[id^="triton_arch_target_"]'));
+            }
+
+            document.addEventListener('wheel', function(ev) {
+                if (!isTritonThresholdInput(ev.target)) return;
+                ev.preventDefault();
+                ev.stopPropagation();
+            }, {capture: true, passive: false});
+
             function startD1ScatterBinding() {
                 bindD1ScatterClick();
                 if (window.__codexD1ScatterBindInterval) return;
