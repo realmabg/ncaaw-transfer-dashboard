@@ -369,12 +369,18 @@ def _normalize_frame(raw: pd.DataFrame, id_prefix: str) -> pd.DataFrame:
     df["porpag"] = _numeric(raw, ["porpag", "PORPAG"], default=np.nan)
     for i, col in enumerate(SIMILARITY_COLUMNS, start=1):
         df[col] = _numeric(raw, [col, f"PC{i}", f"arch_PC{i}"], default=0.0)
+    raw_archetype_scores = pd.DataFrame(index=raw.index)
     for col in ARCHETYPE_SCORE_COLUMNS:
         code = col.replace("score_", "").upper()
-        df[col] = _numeric(raw, [col, code], default=0.0)
-        df[col] = df[col].where(df[col] > 1.0, df[col] * 100.0)
+        raw_archetype_scores[col] = _numeric(raw, [col, code], default=0.0)
+    row_max_score = raw_archetype_scores.max(axis=1)
+    score_scale = pd.Series(np.where(row_max_score.le(1.0), 100.0, 1.0), index=raw.index)
+    for col in ARCHETYPE_SCORE_COLUMNS:
+        df[col] = raw_archetype_scores[col] * score_scale
     df["primary_score_col"] = _text(raw, ["primary_score_col"], default="")
-    df["primary_score"] = _numeric(raw, ["primary_score"], default=np.nan).fillna(df[ARCHETYPE_SCORE_COLUMNS].max(axis=1))
+    raw_primary_score = _numeric(raw, ["primary_score"], default=np.nan)
+    scaled_primary_score = raw_primary_score * score_scale
+    df["primary_score"] = scaled_primary_score.fillna(df[ARCHETYPE_SCORE_COLUMNS].max(axis=1))
     df["meets_pg_preferred"] = _bool(raw, ["meets_pg_preferred"])
     df["meets_wing_preferred"] = _bool(raw, ["meets_wing_preferred"])
     df["meets_big_preferred"] = _bool(raw, ["meets_big_preferred"])
